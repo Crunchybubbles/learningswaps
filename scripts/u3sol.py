@@ -23,8 +23,10 @@ class Uni3Pool:
 
     
 
-
+MAX_U256 = ((2**256) - 1)
 MAX_U160 = ((2**160) - 1)
+MIN_TICK = -887272
+MAX_TICK = 887272
 
 def do_request(query):
     req = r.post('https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3',json={'query':query})
@@ -43,14 +45,18 @@ def getAllPools():
     feeTier,
     createdAtBlockNumber,
     createdAtTimestamp,
+    liquidity,
+    sqrtPrice,
+    token0Price,
+    token1Price
+    tick,
     ticks(where:{liquidityNet_gt: 0}, orderBy:tickIdx, orderDirection:asc){
         tickIdx,
         liquidityNet,
         liquidityGross,
         price0,
         price1
-    },
-    tick
+    }
     }}
     """
     request1 = do_request(query1)
@@ -63,7 +69,7 @@ def getAllPools():
         lastTime = uni3pools[-1]['createdAtTimestamp']
         print(lastTime)
         query2_1 = "{pools(first:1000,orderBy:createdAtTimestamp,orderDirection:asc where:{createdAtTimestamp_gt:"
-        query2_3 = "}){id,token0{id,symbol,decimals},token1{id,symbol,decimals},feeTier,createdAtBlockNumber,createdAtTimestamp,ticks(where:{liquidityNet_gt: 0}, orderBy:tickIdx, orderDirection:asc){id,tickIdx,liquidityNet,liquidityGross,price0,price1},tick}}"
+        query2_3 = "}){id,token0{id,symbol,decimals},token1{id,symbol,decimals},feeTier,createdAtBlockNumber,createdAtTimestamp,liquidity,sqrtprice,token0Price,token1Price,tick,ticks(where:{liquidityNet_gt: 0}, orderBy:tickIdx, orderDirection:asc){id,tickIdx,liquidityNet,liquidityGross,price0,price1}}}"
         query = query2_1 + lastTime + query2_3
         requestN = do_request(query)
         if requestN['data']['pools'] == []:
@@ -169,6 +175,62 @@ def ticksAndAddr(pool):
     for tick in pool['ticks']:
         ticks += [int(tick['tickIdx'])]
     return (address, ticks)
+
+def getSqrtPriceFromTick(tick):
+    tick = int(tick)
+    absTick = abs(tick)
+    assert absTick <= MAX_TICK
+    if absTick & 0x1 != 0:
+        ratio = 0xfffcb933bd6fad37aa2d162d1a594001
+    else:
+        ratio = 0x100000000000000000000000000000000
+    if absTick & 0x2 != 0:
+        ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128
+    if absTick & 0x4 != 0:
+        ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128
+    if absTick & 0x8 != 0:
+        ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128
+    if absTick & 0x10 != 0:
+        ratio = (ratio * 0xffcb9843d60f6159c9db58835c926644) >> 128
+    if absTick & 0x20 != 0:
+        ratio = (ratio * 0xff973b41fa98c081472e6896dfb254c0) >> 128
+    if absTick & 0x40 != 0:
+        ratio = (ratio * 0xff2ea16466c96a3843ec78b326b52861) >> 128
+    if absTick & 0x80 != 0:
+        ratio = (ratio * 0xfe5dee046a99a2a811c461f1969c3053) >> 128
+    if absTick & 0x100 != 0:
+        ratio = (ratio * 0xfcbe86c7900a88aedcffc83b479aa3a4) >> 128
+    if absTick & 0x200 != 0:
+        ratio = (ratio * 0xf987a7253ac413176f2b074cf7815e54) >> 128
+    if absTick & 0x400 != 0:
+        ratio = (ratio * 0xf3392b0822b70005940c7a398e4b70f3) >> 128
+    if absTick & 0x800 != 0:
+        ratio = (ratio * 0xe7159475a2c29b7443b29c7fa6e889d9) >> 128
+    if absTick & 0x1000 != 0:
+        ratio = (ratio * 0xd097f3bdfd2022b8845ad8f792aa5825) >> 128
+    if absTick & 0x2000 != 0:
+        ratio = (ratio * 0xa9f746462d870fdf8a65dc1f90e061e5) >> 128
+    if absTick & 0x4000 != 0:
+        ratio = (ratio * 0x70d869a156d2a1b890bb3df62baf32f7) >> 128
+    if absTick & 0x8000 != 0:
+        ratio = (ratio * 0x31be135f97d08fd981231505542fcfa6) >> 128
+    if absTick & 0x10000 != 0:
+        ratio = (ratio * 0x9aa508b5b7a84e1c677de54f3e99bc9) >> 128
+    if absTick & 0x20000 != 0:
+        ratio = (ratio * 0x5d6af8dedb81196699c329225ee604) >> 128
+    if absTick & 0x40000 != 0:
+        ratio = (ratio * 0x2216e584f5fa1ea926041bedfe98) >> 128
+    if absTick & 0x80000 != 0:
+        ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128
+    if tick > 0:
+        ratio = MAX_U256 / ratio
+
+    if ratio % (1 << 32) == 0:
+        p2 = 0
+    else:
+        p2 = 1
+    sqrtPrice = (ratio >> 32) + p2
+    return sqrtPrice
 
 def mulDiv(n1, n2, d):
     n1 = int(n1)
@@ -311,7 +373,12 @@ def main():
     #data = getPools()
     #pools = data['data']['pool']
  #   print(pools)
-    getAllPools()
+    uni3pools = getAllPools()
+    print(uni3pools[0]['token0Price'])
+    print(uni3pools[0]['token1Price'])
+    print(uni3pools[0]['sqrtPrice'])
+    priceFromTick = getSqrtPriceFromTick(uni3pools[0]['tick'])
+    print(priceFromTick)
     # #    ticks = pools[0]['ticks']
     # addrs = []
 #     # ticks = [[]]
