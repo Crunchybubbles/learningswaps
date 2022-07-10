@@ -1,3 +1,5 @@
+dotenv: .env
+
 project_structure:
     build: build
     contracts: contracts
