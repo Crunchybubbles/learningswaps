@@ -1,5 +1,5 @@
 import brownie
-from brownie import accounts, Uni3ticks
+from brownie import accounts, TickTest
 from brownie.network import priority_fee
 import requests as r
 import math
@@ -27,6 +27,7 @@ MAX_U256 = ((2**256) - 1)
 MAX_U160 = ((2**160) - 1)
 MIN_TICK = -887272
 MAX_TICK = 887272
+Q96 = 0x1000000000000000000000000
 
 def do_request(query):
     req = r.post('https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3',json={'query':query})
@@ -50,7 +51,7 @@ def getAllPools():
     token0Price,
     token1Price
     tick,
-    ticks(where:{liquidityNet_gt: 0}, orderBy:tickIdx, orderDirection:asc){
+    ticks(first: 1000, where: {liquidityNet_gt:0}, orderBy:tickIdx, orderDirection:asc){
         tickIdx,
         liquidityNet,
         liquidityGross,
@@ -69,7 +70,7 @@ def getAllPools():
         lastTime = uni3pools[-1]['createdAtTimestamp']
         print(lastTime)
         query2_1 = "{pools(first:1000,orderBy:createdAtTimestamp,orderDirection:asc where:{createdAtTimestamp_gt:"
-        query2_3 = "}){id,token0{id,symbol,decimals},token1{id,symbol,decimals},feeTier,createdAtBlockNumber,createdAtTimestamp,liquidity,sqrtprice,token0Price,token1Price,tick,ticks(where:{liquidityNet_gt: 0}, orderBy:tickIdx, orderDirection:asc){id,tickIdx,liquidityNet,liquidityGross,price0,price1}}}"
+        query2_3 = "}){id,token0{id,symbol,decimals},token1{id,symbol,decimals},feeTier,createdAtBlockNumber,createdAtTimestamp,liquidity,sqrtprice,token0Price,token1Price,tick,ticks(first: 1000, where: {liquidityNet_gt:0},orderBy:tickIdx, orderDirection:asc){id,tickIdx,liquidityNet,liquidityGross,price0,price1}}}"
         query = query2_1 + lastTime + query2_3
         requestN = do_request(query)
         if requestN['data']['pools'] == []:
@@ -139,35 +140,105 @@ def getPools_Ticks(addrs):
         _ticks += [TICKS]
     return (_addresses, _ticks)
 
+def mulmod(a, b, m):
+    return (a*b)%m
+
+def mulDiv(n1, n2, d):
+    n1 = int(n1)
+    n2 = int(n2)
+    d = int(d)
+    return ((n1 * n2) // d)
+
+def mulDivRoundingUp(n1, n2, d):
+    n1 = int(n1)
+    n2 = int(n2)
+    d = int(d)
+    return math.ceil((n1*n2) // d)
+
+def divRoundingUp(n, d):
+    n = int(n)
+    d = int(d)
+    return math.ceil(n//d)
+
+
+def fullmathMulDiv(a, b, denominator):
+    prod0 = 0
+    prod1 = 0
+    mm = mulmod(a, b, 1)
+    prod0 = a*b
+    if mm < prod0:
+        lt = 1
+    else:
+        lt = 0
+    prod1 = (mm - prod0) - lt
+
+    if prod1 == 0:
+        assert denominator > 0
+        result = prod0 / denominator
+        return result
+    assert denominator > prod1
+
+    remainder = 0
+    remainder = mulmod(a, b, denominator)
+    if remainder > prod0:
+        gt = 1
+    else:
+        gt = 0
+    prod1 = prod1 - gt
+    prod0 = prod0 - remainder
+
+    twos = -denominator & denominator
+
+    denominator = denominator / twos
+
+    twos = ((0 - twos) / twos) + 1
+
+    prod0 = prod0 | (prod1 * twos)
+
+    inv = (3 * denominator) ^ 2
+    inv *= 2 - denominator * inv
+    inv *= 2 - denominator * inv
+    inv *= 2 - denominator * inv
+    inv *= 2 - denominator * inv
+    inv *= 2 - denominator * inv
+
+    result = prod0 * inv
+    return result
+    
 
 def getAmount0Delta(priceA, priceB, liquidity, roundUp):
     if priceA > priceB:
         t = priceA
         priceA = priceB
         priceB = t
-    numerator1 = liquidity << 96
+    numerator1 = int(liquidity) << 96
     numerator2 = priceB - priceA
-    return (((numerator1 * numerator2) / priceB) / priceA)
+    return (((numerator1 * numerator2) // priceB) // priceA)
 
 def getAmount1Delta(priceA, priceB, liquidity, roundUp):
     if priceA > priceB:
         t = priceA
         priceA = priceB
         priceB = t
-    return ((liquidity * (priceB - priceA)) / 96) 
+    if roundUp:
+        return mulDivRoundingUp(liquidity, (priceB - priceA), Q96)
+    else:
+        return mulDiv(liquidity, (priceB - priceA), Q96)
+    #return ((int(liquidity) * (priceB - priceA)) // 96)
+    #return 
 
 def amount0Delta(priceA, priceB, liquidity):
     if liquidity < 0:
-        return -getAmount0Delta(priceA, priceB, liquidity, False)
+        return -getAmount0Delta(priceA, priceB, abs(liquidity), False)
     else:
-        return getAmount0Delta(priceA, priceB, liquidity, True)
+        return getAmount0Delta(priceA, priceB, abs(liquidity), True)
 
     
 def amount1Delta(priceA, priceB, liquidity):
     if liquidity < 0:
-        return -getAmount1Delta(priceA, priceB, liquidity, False)
+        return -getAmount1Delta(priceA, priceB, abs(liquidity), False)
     else:
-        return getAmount1Delta(priceA, priceB, liquidity, True)
+        return getAmount1Delta(priceA, priceB, abs(liquidity), True)
 
 def ticksAndAddr(pool):
     address = pool['id']
@@ -229,25 +300,8 @@ def getSqrtPriceFromTick(tick):
         p2 = 0
     else:
         p2 = 1
-    sqrtPrice = (ratio >> 32) + p2
-    return sqrtPrice
-
-def mulDiv(n1, n2, d):
-    n1 = int(n1)
-    n2 = int(n2)
-    d = int(d)
-    return ((n1 * n2) / d)
-
-def mulDivRoundingUp(n1, n2, d):
-    n1 = int(n1)
-    n2 = int(n2)
-    d = int(d)
-    return math.ceil((n1*n2) / d)
-
-def divRoundingUp(n, d):
-    n = int(n)
-    d = int(d)
-    return math.ceil(n/d)
+    sqrtPrice = (int(ratio) >> 32) + p2
+    return int(sqrtPrice)
 
 def getNextPriceFromAmount0RoundingUp(price, liquidity, amount, add):
     if amount == 0:
@@ -269,13 +323,13 @@ def getNextPriceFromAmount1RoundingDown(price, liquidity, amount, add):
         if amount <= MAX_U160:
             quotient = (int(amount) << 96) / liquidity
         else:
-            quotient = mulDiv(amount, 96, liquidity)
+            quotient = mulDiv(amount, Q96, liquidity)
         return price + quotient
     else:
         if amount <= MAX_U160:
             quotient = divRoundingUp(amount << 96, liquidity)
         else:
-            quotient = mulDivRoundingUp(amount, 96, liquidity)
+            quotient = mulDivRoundingUp(amount, Q96, liquidity)
         assert price > quotient
         return price - quotient
         
@@ -302,9 +356,12 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
     liquidity = int(liquidity)
     amount_remaining = int(amount_remaining)
     feePips = int(feePips)
-    zeroForOne = price_current >= price_target
-    exactIn = amount_remaining >= 0
-
+    zeroForOne = (price_current >= price_target)
+    exactIn = (amount_remaining >= 0)
+#    print(price_current, price_target)
+#    print(price_current >= price_target)
+    print("zf1",zeroForOne)
+    print("exactIn", exactIn)
     if exactIn:
         amountRemainingLessFee = mulDiv(amount_remaining, (10**6 - feePips), (10**6))
         if zeroForOne:
@@ -315,6 +372,7 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
             price_next = price_target
         else:
             price_next = getNextPriceFromInput(price_current, liquidity, amountRemainingLessFee, zeroForOne)
+        print("amountIn", amountIn)
     else:
         if zeroForOne:
             amountOut = getAmount1Delta(price_target, price_current, liquidity, False)
@@ -324,9 +382,10 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
             price_next = price_target
         else:
             price_next = getNextPriceFromOutput(price_current, liquidity, abs(amount_remaining), zeroForOne)
+        print("amountOut", amountOut)
 
     is_max = price_target == price_next
-
+#    print("2 pn, pt", price_next, price_target)
     if zeroForOne:
         if is_max and exactIn:
             amountIn = amountIn
@@ -345,8 +404,12 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
             amountOut = amountOut
         else:
             amountOut = getAmount0Delta(price_current, price_next, liquidity, False)
+    print("amountIn", amountIn)
+    print("amountOut", amountOut)
+    print("")
     if not exactIn and (amountOut > abs(amount_remaining)):
         amountOut = abs(amount_remaining)
+#    print("1 pn, pt", price_next, price_target)
     if exactIn and (price_next != price_target):
         feeAmount = abs(amount_remaining) - amountIn
     else:
@@ -355,13 +418,19 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
 #def index_of_tick(tick_Array, target):
 
 #def v3swap(zeroForOne, amountSpecified, priceLimit):
-    
+
+def diffinator(ar1, ar2):
+    diff = []
+    assert len(ar1) == len(ar2)
+    for i in range(len(ar1) - 1):
+        diff += [ar1[i] - ar2[i]]
+    return diff
 
 
 
 
 def main():
-#    priority_fee("2 gwei")
+    priority_fee("2 gwei")
     # pool = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
     #yfi_eth =  "0x04916039b1f59d9745bf6e0a21f191d1e0a84287"
     #t = "0x2e5848efcfac935dd243c9094048ac346e198e1d"
@@ -374,11 +443,97 @@ def main():
     #pools = data['data']['pool']
  #   print(pools)
     uni3pools = getAllPools()
-    print(uni3pools[0]['token0Price'])
-    print(uni3pools[0]['token1Price'])
-    print(uni3pools[0]['sqrtPrice'])
+    print("token0", uni3pools[0]['token0']['symbol'])
+    print("token1", uni3pools[0]['token1']['symbol'])
+    #print(uni3pools[0]['token0Price'])
+    #print(uni3pools[0]['token1Price'])
+    #print(uni3pools[0]['sqrtPrice'])
     priceFromTick = getSqrtPriceFromTick(uni3pools[0]['tick'])
-    print(priceFromTick)
+    #print(priceFromTick)
+    #print(no_magic(uni3pools[0]['tick']))
+    t = TickTest.deploy({"from": accounts[0]})
+    #print(t.priceFromTick(uni3pools[0]['tick']))
+    currentPrice = int(uni3pools[0]['sqrtPrice'])
+    targetUp = getSqrtPriceFromTick(uni3pools[0]['ticks'][-1]['tickIdx'])
+    targetDown = getSqrtPriceFromTick(uni3pools[0]['ticks'][0]['tickIdx'])
+#    print(uni3pools[0]['ticks'])
+#    for tic in uni3pools[0]['ticks']:
+#        print(getSqrtPriceFromTick(tic['tickIdx']))
+    liquidity = int(uni3pools[0]['liquidity'])
+    amountUp = 10**18
+    amountDown = -(10**18)
+    fee = uni3pools[0]['feeTier']
+    testUp = t.swapStep(currentPrice, targetUp, liquidity, amountUp, fee)
+    myUp = computeSwapStep(currentPrice, targetUp, liquidity, amountUp, fee)
+    testDown = t.swapStep(currentPrice, targetDown, liquidity, amountDown, fee)
+    myDown = computeSwapStep(currentPrice, targetDown, liquidity, amountDown, fee)
+    testUpExactOut = t.swapStep(currentPrice, targetUp, liquidity, -amountUp, fee)
+    myUpexactOut = computeSwapStep(currentPrice, targetUp, liquidity, -amountUp, fee)
+    testDownExactOut = t.swapStep(currentPrice, targetDown, liquidity, -amountDown, fee)
+    myDownexactOut = computeSwapStep(currentPrice, targetDown, liquidity, -amountDown, fee)
+    print("testing computeswapstep")
+    print("up", testUp)
+    print("up", myUp)
+    print("diff", (testUp[0] - myUp[0]), (testUp[1] - myUp[1]), (testUp[2] - myUp[2]), (testUp[3] - myUp[3]))
+    print("")
+    print("down", testDown)
+    print("down", myDown)
+    print("diff", (testDown[0] - myDown[0]), (testDown[1] - myDown[1]), (testDown[2] - myDown[2]), (testDown[3] - myDown[3]))
+    print("")
+    print("exactOut up", testUpExactOut)
+    print("exactOut up", myUpexactOut)
+    print("diff", diffinator(testUpExactOut, myUpexactOut))
+    print("")
+    print("exactOut down", testDownExactOut)
+    print("exactOut down", myDownexactOut)
+    print("diff", diffinator(testDownExactOut, myDownexactOut))
+    print("")
+    print("nextPrice, amountIn, amountOut, feeAmount")
+    print("-------------------------------------------------------------")
+    print("")
+    print("testing amountNDelta")
+    print("amount in")
+    #good
+    tzf1 = t.amount0Delta(targetUp, currentPrice, liquidity)
+    mzf1 = amount0Delta(targetUp, currentPrice, liquidity)
+    print("amount0 zeroforone", tzf1)
+    print("amount0 zeroforone", mzf1)
+    print("diff", (tzf1 - mzf1))
+    print("")
+    #bad
+    t1fz = t.amount1Delta(currentPrice, targetDown,liquidity)
+    m1fz = amount1Delta(currentPrice, targetDown,liquidity)
+    print("amount1 oneforzero", t1fz)
+    print("amount1 oneforzero", m1fz)
+    print("diff", (t1fz - m1fz))
+    print("")
+    #negative 1
+    tzf1 = t.amount0Delta(targetUp, currentPrice, -liquidity)
+    mzf1 = amount0Delta(targetUp, currentPrice, -liquidity)
+    print("amount0 zeroforone", tzf1)
+    print("amount0 zeroforone", mzf1)
+    print("diff", (tzf1 - mzf1))
+    print("")
+    #bad
+    t1fz = t.amount1Delta(targetDown, currentPrice, -liquidity)
+    m1fz = amount1Delta(targetDown, currentPrice, -liquidity)
+    print("amount1 oneforzero", t1fz)
+    print("amount1 oneforzero", m1fz)
+    print("diff", (t1fz - m1fz))
+    print("")
+    print("amount out")
+    tzf1 = t.amount1Delta(targetDown, currentPrice, liquidity)
+    mzf1 = amount1Delta(targetDown, currentPrice, liquidity)
+    print("amount1 zeroforone", tzf1)
+    print("amount1 zeroforone", mzf1)
+    print("diff", (tzf1 - mzf1))
+    t1fz = t.amount0Delta(currentPrice, targetUp, liquidity)
+    m1fz = amount0Delta(currentPrice, targetUp, liquidity)
+    print("amount0 zeroforone", t1fz)
+    print("amount0 zeroforone", m1fz)
+    print("diff", (t1fz - m1fz))
+    
+    
     # #    ticks = pools[0]['ticks']
     # addrs = []
 #     # ticks = [[]]
