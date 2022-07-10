@@ -153,12 +153,12 @@ def mulDivRoundingUp(n1, n2, d):
     n1 = int(n1)
     n2 = int(n2)
     d = int(d)
-    return math.ceil((n1*n2) // d)
+    return math.ceil((n1*n2) // d) + 1
 
 def divRoundingUp(n, d):
     n = int(n)
     d = int(d)
-    return math.ceil(n//d)
+    return math.ceil(n//d) + 1
 
 
 def fullmathMulDiv(a, b, denominator):
@@ -213,8 +213,12 @@ def getAmount0Delta(priceA, priceB, liquidity, roundUp):
         priceB = t
     numerator1 = int(liquidity) << 96
     numerator2 = priceB - priceA
-    return (((numerator1 * numerator2) // priceB) // priceA)
-
+    #return (((numerator1 * numerator2) // priceB) // priceA)
+    if roundUp:
+        return divRoundingUp(mulDivRoundingUp(numerator1, numerator2, priceB), priceA)
+    else:
+        return mulDiv(numerator1, numerator2, priceB) // priceA
+    
 def getAmount1Delta(priceA, priceB, liquidity, roundUp):
     if priceA > priceB:
         t = priceA
@@ -493,28 +497,28 @@ def main():
     print("")
     print("testing amountNDelta")
     print("amount in")
-    #good
+    #diff 1
     tzf1 = t.amount0Delta(targetUp, currentPrice, liquidity)
     mzf1 = amount0Delta(targetUp, currentPrice, liquidity)
     print("amount0 zeroforone", tzf1)
     print("amount0 zeroforone", mzf1)
     print("diff", (tzf1 - mzf1))
     print("")
-    #bad
+    #diff 1
     t1fz = t.amount1Delta(currentPrice, targetDown,liquidity)
     m1fz = amount1Delta(currentPrice, targetDown,liquidity)
     print("amount1 oneforzero", t1fz)
     print("amount1 oneforzero", m1fz)
     print("diff", (t1fz - m1fz))
     print("")
-    #negative 1
+    #diff 0
     tzf1 = t.amount0Delta(targetUp, currentPrice, -liquidity)
     mzf1 = amount0Delta(targetUp, currentPrice, -liquidity)
     print("amount0 zeroforone", tzf1)
     print("amount0 zeroforone", mzf1)
     print("diff", (tzf1 - mzf1))
     print("")
-    #bad
+    #diff 0 
     t1fz = t.amount1Delta(targetDown, currentPrice, -liquidity)
     m1fz = amount1Delta(targetDown, currentPrice, -liquidity)
     print("amount1 oneforzero", t1fz)
@@ -522,11 +526,13 @@ def main():
     print("diff", (t1fz - m1fz))
     print("")
     print("amount out")
+    #off by +1
     tzf1 = t.amount1Delta(targetDown, currentPrice, liquidity)
     mzf1 = amount1Delta(targetDown, currentPrice, liquidity)
     print("amount1 zeroforone", tzf1)
     print("amount1 zeroforone", mzf1)
     print("diff", (tzf1 - mzf1))
+    #off by +1
     t1fz = t.amount0Delta(currentPrice, targetUp, liquidity)
     m1fz = amount0Delta(currentPrice, targetUp, liquidity)
     print("amount0 zeroforone", t1fz)
