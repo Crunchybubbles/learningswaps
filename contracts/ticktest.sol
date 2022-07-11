@@ -38,5 +38,13 @@ contract TickTest {
 	return SqrtPriceMath.getAmount1Delta(A, B, liq);
     }
 
+    function sqrtPriceFromInput(uint160 p, uint128 l, uint256 a, bool z) public pure returns (uint160 nextP) {
+	return SqrtPriceMath.getNextSqrtPriceFromInput(p, l, a, z);
+    }
+
+    function sqrtPriceFromOutput(uint160 p, uint128 l, uint256 a, bool z) public pure returns (uint160 nextP) {
+	return SqrtPriceMath.getNextSqrtPriceFromOutput(p, l, a, z);
+    }
+
 
 }
