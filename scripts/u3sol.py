@@ -1,6 +1,6 @@
 import brownie
-from brownie import accounts, TickTest
-from brownie.network import priority_fee
+from brownie import accounts, TickTest, Contract, interface
+#from brownie.network import priority_fee
 import requests as r
 import math
 
@@ -436,7 +436,10 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
     #         price = getSqrtPriceFromTick(tick['tickIdx'])
     current_tick = int(uni3pool['tick'])
     for i, tick in enumerate(uni3pool['ticks']):
-        if current_tick < int(tick['tickIdx']):
+        if current_tick > int(tick['tickIdx']):
+            prev_i = i
+            prev_tick = tick
+        else: 
             if zeroForOne:
                 price_next_tick = getSqrtPriceFromTick(prev_tick['tickIdx'])
                 index = prev_i
@@ -444,22 +447,25 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
                 price_next_tick = getSqrtPriceFromTick(tick['tickIdx'])
                 index = i
             break
-        else:
-            prev_tick = tick
-            prev_i = i
+
+        
     out = 0
     ticksCrossed = 0
+    print(amount_remaining)
     while amount_remaining != 0:
         #print(price_current)
         #print(price_next_tick)
-        # if zeroForOne:
-        #     price_next_tick = getSqrtPriceFromTick(uni3pool['ticks'][index_next_tick+ticksCrossed]['tickIdx'])
-        # else:
-        #     price_next_tick = getSqrtPriceFromTick(uni3pool['ticks'][index_next_tick-ticksCrossed]['tickIdx'])
         price_next, amountIn, amountOut, feeAmount  = computeSwapStep(price_current, price_next_tick, liquidity, amount_remaining, feePips)
         amount_remaining -= (amountIn + feeAmount)
         out += amountOut
         if amount_remaining <= 0:
+            print("calculated s0")
+            print("price", price_next)
+            if zeroForOne:
+                print("tick", uni3pool['ticks'][index-ticksCrossed]['tickIdx'])
+            else:
+                print("tick", uni3pool['ticks'][index+ticksCrossed]['tickIdx'])
+            print("liquidity", liquidity)
             break
         price_current = price_next
 
@@ -601,10 +607,48 @@ def test_stuff(uni3pools):
         y = t.sqrtPriceFromInput(currentPrice, liquidity, amountUp, False)
         m = getNextPriceFromInput(currentPrice, liquidity, amountUp, False)
         print("diff", (y-m))
+
+def swap_test(uni3pool,n,a):
+    c = TickTest.deploy({"from": accounts[0]})
+    WETH_WHALE = "0x8EB8a3b98659Cce290402893d0123abb75E3ab28"
+    weth = Contract("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+    print(weth.balanceOf(c.address))
+    weth.transferFrom(WETH_WHALE, c.address, (a*10**n), {"from": WETH_WHALE})
+    bal = weth.balanceOf(c.address)
+    print(bal)
+    c.approveToken(weth.address, uni3pool['id'], {"from": accounts[0]})
+    c.swapExactIn(uni3pool['id'], uni3pool['token1']['id'], uni3pool['token0']['id'], bal, False, {"from": accounts[0]})
+    uni = interface.ERC20("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")
+    uni_bal = uni.balanceOf(c.address)
+    print("real         amount out", uni_bal)
+    s0 = c.get_s0(uni3pool['id'])
+    print("real s0",s0[0], s0[1])
+    print("real liquidity", c.get_liquidity(uni3pool['id']))
+
+
+def swap_test_uniToWeth(uni3pool,n,a):
+    c = TickTest.deploy({"from": accounts[0]})
+    UNI_WHALE = "0x47173b170c64d16393a52e6c480b3ad8c302ba1e"
+    uni = interface.ERC20("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")    
+    print(uni.balanceOf(c.address))
+    uni.transferFrom(UNI_WHALE, c.address, (a*10**n), {"from": UNI_WHALE})
+    uni_bal = uni.balanceOf(c.address)
+    print(uni_bal)
+    c.approveToken(uni.address, uni3pool['id'], {"from": accounts[0]})
+    c.swapExactIn(uni3pool['id'], uni3pool['token0']['id'], uni3pool['token1']['id'], uni_bal, True, {"from": accounts[0]})
+
+    weth = interface.ERC20("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
+
+    bal = weth.balanceOf(c.address)
+    print("real         amount out",bal)
+    s0 = c.get_s0(uni3pool['id'])
+    print("real s0",s0[0], s0[1])
+    print("real liquidity", c.get_liquidity(uni3pool['id']))
+
                                     
 
 def main():
-    priority_fee("2 gwei")
+    #priority_fee("2 gwei")
     # pool = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
     #yfi_eth =  "0x04916039b1f59d9745bf6e0a21f191d1e0a84287"
     #t = "0x2e5848efcfac935dd243c9094048ac346e198e1d"
@@ -618,26 +662,31 @@ def main():
  #   print(pools)
     uni3pools = getAllPools()
 
-    print("zeroForOne swap test")
+    # print("zeroForOne swap test")
+    # tokenIn = uni3pools[0]["token0"]['id']
+    # tokenOut = uni3pools[0]["token1"]['id']
+    # print(tokenIn, tokenOut)
+    # for i in range(18, 23):
+        
+    #     amountIn = 10**i
+    #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
+    #     print(amountIn*10**-18, amountOut*10**-18)
+    a = 1
+    n = 21
+    swap_test_uniToWeth(uni3pools[0],n,a)    
+    # print("oneForZero swap test")
     tokenIn = uni3pools[0]["token0"]['id']
     tokenOut = uni3pools[0]["token1"]['id']
-    print(tokenIn, tokenOut)
-    for i in range(18, 23):
+    # print(tokenIn, tokenOut)
+    # for i in range(18, 23):
         
-        amountIn = 10**i
-        amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-        print(amountIn*10**-18, amountOut*10**-18)
+    #     amountIn = 10**i
+    #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
+    #     print(amountIn*10**-18, amountOut*10**-18)
+    amountIn = a*10**n
+    amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
+    print("my calculated amountOut", amountOut)
 
-    
-    print("oneForZero swap test")
-    tokenIn = uni3pools[0]["token1"]['id']
-    tokenOut = uni3pools[0]["token0"]['id']
-    print(tokenIn, tokenOut)
-    for i in range(18, 23):
-        
-        amountIn = 10**i
-        amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-        print(amountIn*10**-18, amountOut*10**-18)
     #test_stuff(uni3pools)    
     #print(uni3pools[0]['token0Price'])
     #print(uni3pools[0]['token1Price'])
