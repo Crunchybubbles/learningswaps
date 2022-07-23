@@ -1,8 +1,13 @@
 import brownie
-from brownie import accounts, TickTest, Contract, interface
+from brownie import accounts, TickTest, Contract, interface, QuoterV2
 #from brownie.network import priority_fee
 import requests as r
 import math
+from collections import namedtuple
+
+
+
+
 
 class Uni3Pool:
     def __init__(self, query):
@@ -26,6 +31,202 @@ MIN_TICK = -887272
 MAX_TICK = 887272
 Q96 = 0x1000000000000000000000000
 
+
+def getSqrtPriceFromTick(tick):
+    tick = int(tick)
+    absTick = abs(tick)
+    assert absTick <= MAX_TICK
+    if absTick & 0x1 != 0:
+        ratio = 0xfffcb933bd6fad37aa2d162d1a594001
+    else:
+        ratio = 0x100000000000000000000000000000000
+    if absTick & 0x2 != 0:
+        ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128
+    if absTick & 0x4 != 0:
+        ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128
+    if absTick & 0x8 != 0:
+        ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128
+    if absTick & 0x10 != 0:
+        ratio = (ratio * 0xffcb9843d60f6159c9db58835c926644) >> 128
+    if absTick & 0x20 != 0:
+        ratio = (ratio * 0xff973b41fa98c081472e6896dfb254c0) >> 128
+    if absTick & 0x40 != 0:
+        ratio = (ratio * 0xff2ea16466c96a3843ec78b326b52861) >> 128
+    if absTick & 0x80 != 0:
+        ratio = (ratio * 0xfe5dee046a99a2a811c461f1969c3053) >> 128
+    if absTick & 0x100 != 0:
+        ratio = (ratio * 0xfcbe86c7900a88aedcffc83b479aa3a4) >> 128
+    if absTick & 0x200 != 0:
+        ratio = (ratio * 0xf987a7253ac413176f2b074cf7815e54) >> 128
+    if absTick & 0x400 != 0:
+        ratio = (ratio * 0xf3392b0822b70005940c7a398e4b70f3) >> 128
+    if absTick & 0x800 != 0:
+        ratio = (ratio * 0xe7159475a2c29b7443b29c7fa6e889d9) >> 128
+    if absTick & 0x1000 != 0:
+        ratio = (ratio * 0xd097f3bdfd2022b8845ad8f792aa5825) >> 128
+    if absTick & 0x2000 != 0:
+        ratio = (ratio * 0xa9f746462d870fdf8a65dc1f90e061e5) >> 128
+    if absTick & 0x4000 != 0:
+        ratio = (ratio * 0x70d869a156d2a1b890bb3df62baf32f7) >> 128
+    if absTick & 0x8000 != 0:
+        ratio = (ratio * 0x31be135f97d08fd981231505542fcfa6) >> 128
+    if absTick & 0x10000 != 0:
+        ratio = (ratio * 0x9aa508b5b7a84e1c677de54f3e99bc9) >> 128
+    if absTick & 0x20000 != 0:
+        ratio = (ratio * 0x5d6af8dedb81196699c329225ee604) >> 128
+    if absTick & 0x40000 != 0:
+        ratio = (ratio * 0x2216e584f5fa1ea926041bedfe98) >> 128
+    if absTick & 0x80000 != 0:
+        ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128
+    if tick > 0:
+        ratio = MAX_U256 // ratio
+
+    if ratio % (1 << 32) == 0:
+        p2 = 0
+    else:
+        p2 = 1
+    sqrtPrice = (int(ratio) >> 32) + p2
+    return int(sqrtPrice)
+
+def shl(shift, num):
+    return num << shift
+
+def shr(shift, num):
+    return num >> shift
+
+def gt(n1, n2):
+    if n1 > n2:
+        return 1
+    else:
+        return 0
+
+
+def getTickAtSqrt(price):
+    ratio = price << 32
+    r = ratio
+    msb = 0
+
+    f = shl(7, gt(r, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF))
+    msb = msb | f
+    r = shr(f,r)
+
+    f = shl(6, gt(r, 0xFFFFFFFFFFFFFFFF))
+    msb = msb | f
+    r = shr(f,r)
+
+    f = shl(5, gt(r, 0xFFFFFFFF))
+    msb = msb | f
+    r = shr(f,r)
+
+    f = shl(4, gt(r, 0xFFFF))
+    msb = msb | f
+    r = shr(f,r)
+
+    f = shl(3, gt(r, 0xFF))
+    msb = msb | f
+    r = shr(f,r)
+
+    f = shl(2, gt(r, 0xF))
+    msb = msb | f
+    r = shr(f,r)
+
+    f = shl(1, gt(r, 0x3))
+    msb = msb | f
+    r = shr(f,r)
+
+    f = gt(r, 0x1)
+    msb = msb | f
+
+    if msb >= 128:
+        r = ratio >> (msb - 127)
+    else:
+        r = ratio << (127 - msb)
+
+    log_2 = (msb - 128) << 64
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(63, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(62, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(61, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(60, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(59, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(58, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(57, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(56, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(55, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(54, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(53, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(52, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(51, f)
+    r = shr(f,r)
+
+    r = shr(127, (r*r))
+    f = shr(128, r)
+    log_2 = log_2 | shl(50, f)
+
+    log_sqrt10001 = log_2 * 255738958999603826347141
+
+    tickLow = (log_sqrt10001 - 3402992956809132418596140100660247210) >> 128
+    tickHi = (log_sqrt10001 + 291339464771989622907027621153398088495) >> 128
+    if tickLow == tickHi:
+        return tickLow
+    else:
+        if getSqrtPriceFromTick(tickHi) <= price:
+            return tickHi
+        else:
+            return tickLow
+
+    
+    
 def do_request(query):
     req = r.post('https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3',json={'query':query})
     if req.status_code == 200:
@@ -36,7 +237,7 @@ def do_request(query):
 def getAllPools():
     uni3pools = []
     query1 = """
-    {pools(first:10,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc) { 
+    {pools(first:1,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc) { 
     id,
     token0 {id,symbol,decimals},
     token1{id,symbol,decimals},
@@ -48,7 +249,7 @@ def getAllPools():
     token0Price,
     token1Price
     tick,
-    ticks(first: 1000, where: {liquidityNet_gt:0}, orderBy:tickIdx, orderDirection:asc){
+    ticks(first: 1000, orderBy:tickIdx, orderDirection:asc){
         tickIdx,
         liquidityNet,
         liquidityGross,
@@ -59,6 +260,9 @@ def getAllPools():
     """
     request1 = do_request(query1)
     for pool in request1['data']['pools']:
+        for tick in pool['ticks']:
+            price = getSqrtPriceFromTick(tick['tickIdx'])
+            tick['price'] = price
         uni3pools += [pool]
         #print(pool.keys())
     #print(uni3pools)
@@ -222,62 +426,6 @@ def ticksAndAddr(pool):
         ticks += [int(tick['tickIdx'])]
     return (address, ticks)
 
-def getSqrtPriceFromTick(tick):
-    tick = int(tick)
-    absTick = abs(tick)
-    assert absTick <= MAX_TICK
-    if absTick & 0x1 != 0:
-        ratio = 0xfffcb933bd6fad37aa2d162d1a594001
-    else:
-        ratio = 0x100000000000000000000000000000000
-    if absTick & 0x2 != 0:
-        ratio = (ratio * 0xfff97272373d413259a46990580e213a) >> 128
-    if absTick & 0x4 != 0:
-        ratio = (ratio * 0xfff2e50f5f656932ef12357cf3c7fdcc) >> 128
-    if absTick & 0x8 != 0:
-        ratio = (ratio * 0xffe5caca7e10e4e61c3624eaa0941cd0) >> 128
-    if absTick & 0x10 != 0:
-        ratio = (ratio * 0xffcb9843d60f6159c9db58835c926644) >> 128
-    if absTick & 0x20 != 0:
-        ratio = (ratio * 0xff973b41fa98c081472e6896dfb254c0) >> 128
-    if absTick & 0x40 != 0:
-        ratio = (ratio * 0xff2ea16466c96a3843ec78b326b52861) >> 128
-    if absTick & 0x80 != 0:
-        ratio = (ratio * 0xfe5dee046a99a2a811c461f1969c3053) >> 128
-    if absTick & 0x100 != 0:
-        ratio = (ratio * 0xfcbe86c7900a88aedcffc83b479aa3a4) >> 128
-    if absTick & 0x200 != 0:
-        ratio = (ratio * 0xf987a7253ac413176f2b074cf7815e54) >> 128
-    if absTick & 0x400 != 0:
-        ratio = (ratio * 0xf3392b0822b70005940c7a398e4b70f3) >> 128
-    if absTick & 0x800 != 0:
-        ratio = (ratio * 0xe7159475a2c29b7443b29c7fa6e889d9) >> 128
-    if absTick & 0x1000 != 0:
-        ratio = (ratio * 0xd097f3bdfd2022b8845ad8f792aa5825) >> 128
-    if absTick & 0x2000 != 0:
-        ratio = (ratio * 0xa9f746462d870fdf8a65dc1f90e061e5) >> 128
-    if absTick & 0x4000 != 0:
-        ratio = (ratio * 0x70d869a156d2a1b890bb3df62baf32f7) >> 128
-    if absTick & 0x8000 != 0:
-        ratio = (ratio * 0x31be135f97d08fd981231505542fcfa6) >> 128
-    if absTick & 0x10000 != 0:
-        ratio = (ratio * 0x9aa508b5b7a84e1c677de54f3e99bc9) >> 128
-    if absTick & 0x20000 != 0:
-        ratio = (ratio * 0x5d6af8dedb81196699c329225ee604) >> 128
-    if absTick & 0x40000 != 0:
-        ratio = (ratio * 0x2216e584f5fa1ea926041bedfe98) >> 128
-    if absTick & 0x80000 != 0:
-        ratio = (ratio * 0x48a170391f7dc42444e8fa2) >> 128
-    if tick > 0:
-        ratio = MAX_U256 / ratio
-
-    if ratio % (1 << 32) == 0:
-        p2 = 0
-    else:
-        p2 = 1
-    sqrtPrice = (int(ratio) >> 32) + p2
-    return int(sqrtPrice)
-
 def getNextPriceFromAmount0RoundingUp(price, liquidity, amount, add):
     if amount == 0:
         return price
@@ -288,11 +436,11 @@ def getNextPriceFromAmount0RoundingUp(price, liquidity, amount, add):
             denominator = numerator1 + product
             if denominator >= numerator1:
                 return mulDivRoundingUp(numerator1, price, denominator)
-        return divRoundingUp(numerator1, ((numerator1 / price) + amount))
+        return divRoundingUp(numerator1, ((numerator1 // price) + amount))
     else:
         denominator = numerator1 - (amount * price)
         return mulDivRoundingUp(numerator1, price, denominator)
-
+#issue leads here?
 def getNextPriceFromAmount1RoundingDown(price, liquidity, amount, add):
     if add:
         if amount <= MAX_U160:
@@ -308,7 +456,7 @@ def getNextPriceFromAmount1RoundingDown(price, liquidity, amount, add):
         assert price > quotient
         return price - quotient
         
-                
+#issue here?                
 def getNextPriceFromInput(price, liquidity, amountIn, zeroForOne):
     assert price > 0
     assert liquidity > 0
@@ -342,7 +490,8 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
         amountOut = 0
         feeAmount = 0
         return (price_current, amountIn, amountOut, feeAmount)
-#    print(price_current, price_target)
+    print("price_targetss", price_target)
+    print("price_currentss", price_current)
 #    print(price_current >= price_target)
 #    print("zf1",zeroForOne)
 #    print("exactIn", exactIn)
@@ -367,7 +516,7 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
         else:
             price_next = getNextPriceFromOutput(price_current, liquidity, amount_remaining, zeroForOne)
 #        print("amountOut", amountOut)
-
+    print("price_next",price_next)
     is_max = price_target == price_next
 #    print("2 pn, pt", price_next, price_target)
     if zeroForOne:
@@ -401,6 +550,96 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
     return (price_next, amountIn, amountOut, feeAmount)
 #def index_of_tick(tick_Array, target):
 
+
+
+StepComputations = namedtuple('Stepcomputations', ["price_start", "tick_next", "price_next_tick", "amount_in", "amount_out", "fee_amount"])
+SwapState = namedtuple('Swapstate', ["amount_remaining", "amount_calculated", "price_current", "tick_current", "liquidity", "index_next_tick"])
+
+
+# def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
+#     pool_addr = uni3pool['id']
+#     feePips = uni3pool['feeTier']
+#     token0 = uni3pool['token0']['id']
+#     token1 = uni3pool['token1']['id']
+
+
+#     if (tokenIn == token0 or tokenIn == token1) and (tokenOut == token0 or tokenOut == token1):
+#         if tokenIn == token0:
+#             zeroForOne = True
+#         else:
+#             zeroForOne = False
+#     else:
+#         return "these tokens arnt in this pool"
+#     #print(zeroForOne)
+#     current_tick = int(uni3pool['tick'])
+#     for i, tick in enumerate(uni3pool['ticks']):
+#         if current_tick > int(tick['tickIdx']):
+#             prev_i = i
+#             prev_tick = tick
+#         else: 
+#             if zeroForOne:
+#                 #price_next_tick = prev_tick['price']
+#                 index = prev_i
+#             else:
+#                 #price_next_tick = tick['price']
+#                 index = i
+#             break
+
+        
+#     out = 0
+#     ticksCrossed = 0
+#     length = len(uni3pool['ticks'])
+#     state = SwapState(initialAmountIn, 0, int(uni3pool['sqrtPrice']), int(uni3pool['tick']), uni3pool['liquidity'], index)
+#     while state.amount_remaining != 0:
+
+#         if zeroForOne:
+#             if (index - ticksCrossed) < 0:
+#                 tickIndex = 0
+#             else:
+#                 tickIndex = index - ticksCrossed
+
+#         else:
+#             if (index + ticksCrossed) > (length - 1):
+#                 tickIndex = (length - 1)
+#             else:
+#                 tickIndex = index + ticksCrossed
+#         step = StepComputations(0,0,0,0,0,0)
+
+#         step.price_start = state.price_current
+
+#         step.tick_next = uni3pool['ticks'][tickIndex]['tickIdx'] 
+        
+#         step.price_next_tick = step.tick_next['price']
+
+#         state.price_current, step.amount_in, step.amount_out, step.fee_amount = computeSwapStep(state.price_current, step.price_next_tick, state.liquidity, state.amount_remaining, feePips)
+        
+#         state.amount_remaining -= (step.amount_in + step.fee_amount)
+#         state.amount_calculated -= step.amount_out 
+
+#         if state.price_current == step.price_next_tick:
+#             if zeroForOne:
+#                 liquidityNet = -int(uni3pool['ticks'][tickIndex]['liquidityNet'])
+
+#             else:
+#                 liquidityNet = int(uni3pool['ticks'][tickIndex]['liquidityNet'])
+#             state.liquidity = addDelta(state.liquidity, liquidityNet)
+#             ticksCrossed += 1
+# #            print("crossed tick")
+#         elif state.price_current != step.price_start:
+#             state.tick = getTickAtSqrt(state.price_current)
+
+
+#     if zeroForOne:
+#         amount0 = initialAmountIn - state.amount_remaining 
+#         amount1 = state.amount_calculated
+#     else:
+#         amount0 = state.amount_calculated
+#         amount1 = initialAmountIn - state.amount_remaining
+#     return amount0, amount1
+
+
+
+
 def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
     pool_addr = uni3pool['id']
     price_current = uni3pool['sqrtPrice']
@@ -410,6 +649,7 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
     token0 = uni3pool['token0']['id']
     token1 = uni3pool['token1']['id']
     debug = False
+
     if debug:
         print(pool_addr)
         
@@ -421,19 +661,6 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
     else:
         return "these tokens arnt in this pool"
     #print(zeroForOne)
-    # price = getSqrtPriceFromTick(uni3pool['ticks'][0]['tickIdx'])
-    # for index, tick in enumerate(uni3pool['ticks']):
-    #     if price >= int(price_current):
-    #         if zeroForOne:
-    #             price_next_tick = price
-    #             index_next_tick = index
-    #             break
-    #         else:
-    #             price_next_tick = price
-    #             index_next_tick = index
-    #             break
-    #     else:
-    #         price = getSqrtPriceFromTick(tick['tickIdx'])
     current_tick = int(uni3pool['tick'])
     for i, tick in enumerate(uni3pool['ticks']):
         if current_tick > int(tick['tickIdx']):
@@ -441,50 +668,88 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
             prev_tick = tick
         else: 
             if zeroForOne:
-                price_next_tick = getSqrtPriceFromTick(prev_tick['tickIdx'])
+                #price_next_tick = prev_tick['price']
                 index = prev_i
             else:
-                price_next_tick = getSqrtPriceFromTick(tick['tickIdx'])
+                #price_next_tick = tick['price']
                 index = i
             break
 
         
     out = 0
     ticksCrossed = 0
-    print(amount_remaining)
+    length = len(uni3pool['ticks'])
+#    amount_calculated = 0
+    print("amount remaining",amount_remaining)
+    print("start tick", current_tick)
+    print("")
     while amount_remaining != 0:
-        #print(price_current)
-        #print(price_next_tick)
-        price_next, amountIn, amountOut, feeAmount  = computeSwapStep(price_current, price_next_tick, liquidity, amount_remaining, feePips)
-        amount_remaining -= (amountIn + feeAmount)
-        out += amountOut
-        if amount_remaining <= 0:
-            print("calculated s0")
-            print("price", price_next)
-            if zeroForOne:
-                print("tick", uni3pool['ticks'][index-ticksCrossed]['tickIdx'])
+        price_start = price_current
+        if zeroForOne:
+            if (index - ticksCrossed) < 0:
+                tickIndex = 0
             else:
-                print("tick", uni3pool['ticks'][index+ticksCrossed]['tickIdx'])
+                tickIndex = index - ticksCrossed
+
+        else:
+            if (index + ticksCrossed) > (length - 1):
+                tickIndex = (length - 1)
+            else:
+                tickIndex = index + ticksCrossed
+
+        tick_next = uni3pool['ticks'][tickIndex]
+        price_next_tick = tick_next['price']
+
+        price_current, amountIn, amountOut, feeAmount  = computeSwapStep(price_current, price_next_tick, liquidity, amount_remaining, feePips)
+        amount_remaining -= (amountIn + feeAmount)
+        #amount_calculated -= amountOut
+        out += amountOut
+        print("remaining",amount_remaining)
+        if amount_remaining <= 0:
+            print("")
+            print("numbers at amount_remaining <= 0")
+            print("price_current", price_current)
+            print("liquidity", liquidity)
+            print("tick", uni3pool['ticks'][tickIndex]['tickIdx'])
+            print("calculated tick price_current", getTickAtSqrt(price_current))
             print("liquidity", liquidity)
             break
-        price_current = price_next
+        #price_current = price_next
 
         if price_current == price_next_tick:
             if zeroForOne:
-                price_next_tick = getSqrtPriceFromTick(uni3pool['ticks'][index-ticksCrossed]['tickIdx'])
-                liquidityNet = -int(uni3pool['ticks'][index+ticksCrossed]['liquidityNet'])
+                liquidityNet = -int(tick_next['liquidityNet'])
 
             else:
-                price_next_tick = getSqrtPriceFromTick(uni3pool['ticks'][index+ticksCrossed]['tickIdx'])
-                liquidityNet = int(uni3pool['ticks'][index+ticksCrossed]['liquidityNet'])
+                liquidityNet = int(tick_next['liquidityNet'])
             liquidity = addDelta(liquidity, liquidityNet)
             ticksCrossed += 1
-#            print("crossed tick")
+        # elif price_current != price_start:
+        #     tick_next = tickFromPrice(price_current)
+            
+            
+            #tick_current = getTickAtSqrt(price_current)
+            #price_current = getSqrtPriceFromTick(tick_current)
+            print("liquidityNet", liquidityNet)
+            print("liquidity", liquidity)
+            
+            print("crossed tick")
+            print("")
+
+            
+
 #            print("liquidity", liquidity)
 #            print("liquidityNet", liquidityNet)
+    # if zeroForOne:
+    #     amount0 = initialAmountIn - amount_remaining
+    #     amount1 = amount_calculated
+
+    # else:
+    #     amount0 = amount_calculated
+    #     amount1 = initialAmountIn - amount_remaining
             
         
-    return out
+    return out#, amount0, amount1
 
 def diffinator(ar1, ar2):
     diff = []
@@ -494,7 +759,7 @@ def diffinator(ar1, ar2):
     return diff
 
 
-def test_stuff(uni3pools):
+def test_stuff(uni3pools,n,a):
     t = TickTest.deploy({"from": accounts[0]})
 #    for i in range(len(uni3pools)):
     for i in range(1):
@@ -509,8 +774,8 @@ def test_stuff(uni3pools):
         liquidity = int(uni3pools[i]['liquidity'])
         token0decimals = int(uni3pools[i]['token0']['decimals'])
         token1decimals = int(uni3pools[i]['token1']['decimals'])
-        amountUp = 10**token0decimals
-        amountDown = 10**token1decimals
+        amountUp = a*10**n
+        amountDown = a*10**n
         print("liquidity", liquidity)
         print("current price", currentPrice)
         print("amountIn going up",amountUp)
@@ -608,22 +873,42 @@ def test_stuff(uni3pools):
         m = getNextPriceFromInput(currentPrice, liquidity, amountUp, False)
         print("diff", (y-m))
 
+def tick_check(uni3pool):
+    c = TickTest.deploy({"from": accounts[0]})
+    #print(uni3pool['id'])
+    for t in uni3pool['ticks']:
+         r = c.check_ticks(uni3pool['id'], t['tickIdx'])
+         if (t['liquidityNet'] == r[1]) and (r[-1] == True):
+             print("looking good")
+         else:
+             print("BAD!", t, r)
+             
 def swap_test(uni3pool,n,a):
     c = TickTest.deploy({"from": accounts[0]})
     WETH_WHALE = "0x8EB8a3b98659Cce290402893d0123abb75E3ab28"
     weth = Contract("0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2")
-    print(weth.balanceOf(c.address))
+    #print(weth.balanceOf(c.address))
     weth.transferFrom(WETH_WHALE, c.address, (a*10**n), {"from": WETH_WHALE})
     bal = weth.balanceOf(c.address)
-    print(bal)
+    #print(bal)
     c.approveToken(weth.address, uni3pool['id'], {"from": accounts[0]})
+    s0_pre = c.get_s0(uni3pool['id'])
+    liquidity_pre = c.get_liquidity(uni3pool['id'])
     c.swapExactIn(uni3pool['id'], uni3pool['token1']['id'], uni3pool['token0']['id'], bal, False, {"from": accounts[0]})
     uni = interface.ERC20("0x1f9840a85d5af5bf1d1762f925bdaddc4201f984")
     uni_bal = uni.balanceOf(c.address)
-    print("real         amount out", uni_bal)
+    print("")
+    print("real numbers")
+    print("amount out  price  tick  price_post  tick_post  liquidity  liquidity_post")
     s0 = c.get_s0(uni3pool['id'])
-    print("real s0",s0[0], s0[1])
-    print("real liquidity", c.get_liquidity(uni3pool['id']))
+    print(uni_bal)
+    print(s0_pre[0])
+    print(s0_pre[1])
+    print(s0[0])
+    print(s0[1])
+    print(liquidity_pre)
+    print(c.get_liquidity(uni3pool['id']))          
+    return (uni_bal, s0[1])
 
 
 def swap_test_uniToWeth(uni3pool,n,a):
@@ -644,9 +929,58 @@ def swap_test_uniToWeth(uni3pool,n,a):
     s0 = c.get_s0(uni3pool['id'])
     print("real s0",s0[0], s0[1])
     print("real liquidity", c.get_liquidity(uni3pool['id']))
+    return bal
 
-                                    
+def percent_error(calc, real):
+    return ((calc - real) / real) * 100
 
+def quote_exactInSinglePool_oneForZero(uni3pool,n,a):
+    q = QuoterV2.deploy("0x1F98431c8aD98523631AE4a59f267346ea31F984", "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", {"from": accounts[0]})
+    tokenIn = uni3pool['token1']['id']
+    tokenOut = uni3pool['token0']['id']
+    amountIn = a*10**n
+    fee = uni3pool['feeTier']
+    priceLimit = uni3pool['ticks'][-1]['price']
+    r = q.quoteExactInputSingle((tokenIn, tokenOut, amountIn, fee, priceLimit), {"from": accounts[0]})
+    print(r)
+
+def testTick(uni3pool):
+    c = TickTest.deploy({"from": accounts[0]})
+    my_tick = getTickAtSqrt(int(uni3pool['sqrtPrice']))
+    real_tick = c.tickFromPrice(uni3pool['sqrtPrice'])
+    actual_tick = uni3pool['tick']
+    print(my_tick, real_tick, actual_tick)
+
+def test_nextTick(uni3pool):
+    c = TickTest.deploy({"from": accounts[0]})
+
+    current_tick = int(uni3pool['tick'])
+    for i, tick in enumerate(uni3pool['ticks']):
+        if current_tick > int(tick['tickIdx']):
+            prev_i = i
+            prev_tick = tick
+        else: 
+            index_left = prev_i
+            index_right = i
+            break
+    lefttick = c.nextInitializedTickWithinOneWord(uni3pool['id'], uni3pool['tick'], True)
+    righttick = c.nextInitializedTickWithinOneWord(uni3pool['id'], uni3pool['tick'], False)
+    print("left  ", lefttick)
+    print("right ", righttick)
+    print("cleft ", uni3pool['ticks'][index_left]['tickIdx'])
+    print("cright", uni3pool['ticks'][index_right]['tickIdx'])
+
+def test_mulDiv(n1, n2, d):
+    c = TickTest.deploy({"from": accounts[0]})
+    r = c.mulDiv(n1,n2,d)
+    m = mulDiv(n1,n2,d)
+    print("")
+    print("mul div test")
+    print(r)
+    print(m)
+    print(f"percent error {percent_error(m, r)}%")
+    print("")
+    
 def main():
     #priority_fee("2 gwei")
     # pool = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
@@ -661,7 +995,12 @@ def main():
     #pools = data['data']['pool']
  #   print(pools)
     uni3pools = getAllPools()
-
+    #tick_check(uni3pools[0])
+    #test_mulDiv((10**18), Q96, 217271867385839462693395)
+    #testTick(uni3pools[0])
+    #print(len(uni3pools[0]['ticks']))
+    #print(uni3pools[0]['tick'])
+    #test_nextTick(uni3pools[0])
     # print("zeroForOne swap test")
     # tokenIn = uni3pools[0]["token0"]['id']
     # tokenOut = uni3pools[0]["token1"]['id']
@@ -671,12 +1010,15 @@ def main():
     #     amountIn = 10**i
     #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
     #     print(amountIn*10**-18, amountOut*10**-18)
-    a = 1
-    n = 21
-    swap_test_uniToWeth(uni3pools[0],n,a)    
+    a = 247
+    n = 18
+    #test_stuff(uni3pools, n, a)    
+    #quote_exactInSinglePool_oneForZero(uni3pools[0], n, a) 
+    # swap_test_uniToWeth(uni3pools[0],n,a)
+    bal, last_tick = swap_test(uni3pools[0],n,a)    
     # print("oneForZero swap test")
-    tokenIn = uni3pools[0]["token0"]['id']
-    tokenOut = uni3pools[0]["token1"]['id']
+    tokenIn = uni3pools[0]["token1"]['id']
+    tokenOut = uni3pools[0]["token0"]['id']
     # print(tokenIn, tokenOut)
     # for i in range(18, 23):
         
@@ -684,10 +1026,24 @@ def main():
     #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
     #     print(amountIn*10**-18, amountOut*10**-18)
     amountIn = a*10**n
-    amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-    print("my calculated amountOut", amountOut)
 
-    #test_stuff(uni3pools)    
+    amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
+    print("my calculated amounts")
+    print(amountOut)
+
+    print("real last tick", last_tick)
+
+    
+    
+    print(f"percent error {percent_error(amountOut, bal)}%")
+    #tick_check(uni3pools[0])
+
+
+
+
+    
+
+    
     #print(uni3pools[0]['token0Price'])
     #print(uni3pools[0]['token1Price'])
     #print(uni3pools[0]['sqrtPrice'])

@@ -2,7 +2,10 @@ pragma solidity >=0.5.0 <0.8.0;
 pragma abicoder v2;
 
 import "Uniswap/v3-core@1.0.0/contracts/libraries/TickMath.sol";
+import "Uniswap/v3-core@1.0.0/contracts/libraries/BitMath.sol";
+import "Uniswap/v3-core@1.0.0/contracts/libraries/TickBitmap.sol";
 import "Uniswap/v3-core@1.0.0/contracts/libraries/SwapMath.sol";
+import "Uniswap/v3-core@1.0.0/contracts/libraries/FullMath.sol";
 import "Uniswap/v3-core@1.0.0/contracts/libraries/SqrtPriceMath.sol";
 //import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/libraries/Path.sol";
 //import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/interfaces/ISwapRouter.sol";
@@ -15,6 +18,15 @@ interface IERC20 {
 }
 
 interface IUniswapV3Pool {
+    event Swap(
+        address indexed sender,
+        address indexed recipient,
+        int256 amount0,
+        int256 amount1,
+        uint160 sqrtPriceX96,
+        uint128 liquidity,
+        int24 tick
+    );
     struct Slot0 {
         // the current price
         uint160 sqrtPriceX96;
@@ -32,24 +44,40 @@ interface IUniswapV3Pool {
         // whether the pool is locked
         bool unlocked;
     }
-	function slot0() external view returns (Slot0 memory s0);
-	function swap(address recipient,
-		      bool zeroForOne,
-		      int256 amountSpecified,
-		      uint160 sqrtPriceLimitX96,
-		      bytes calldata data
-		      ) external returns (int256 amount0, int256 amount1);
-	function liquidity() external view returns (uint128);
-	function ticks(int24 tick) external view returns (
-							  uint128 liquidityGross,
-							  int128 liquidityNet,
-							  uint256 feeGrowthOutside0X128,
-							  uint256 feeGrowthOutside1X128,
-							  int56 tickCumulativeOutside,
-							  uint160 secondsPerLiquidityOutsideX128,
-							  uint32 secondsOutside,
-							  bool initialized
-							  );
+
+
+    /* struct Tick { */
+    /* 	uint128 liquidityGross; */
+    /* 	int128 liquidityNet; */
+    /* 	uint256 feeGrowthOutside0X128; */
+    /* 	uint256 feeGrowthOutside1X128; */
+    /* 	int56 tickCumulativeOutside; */
+    /* 	uint160 secondsPerLiquidityOutsideX128; */
+    /* 	uint32 secondsOutside; */
+    /* 	bool initialized; */
+    /* } */
+
+
+    function slot0() external view returns (Slot0 memory s0);
+    function swap(address recipient,
+		  bool zeroForOne,
+		  int256 amountSpecified,
+		  uint160 sqrtPriceLimitX96,
+		  bytes calldata data
+		  ) external returns (int256 amount0, int256 amount1);
+    function liquidity() external view returns (uint128);
+    function ticks(int24 tick) external view returns (
+						      uint128 liquidityGross,
+						      int128 liquidityNet,
+						      uint256 feeGrowthOutside0X128,
+						      uint256 feeGrowthOutside1X128,
+						      int56 tickCumulativeOutside,
+						      uint160 secondsPerLiquidityOutsideX128,
+						      uint32 secondsOutside,
+						      bool initialized
+						      );
+    function tickBitmap(int16 wordPosition) external view returns (uint256);
+    function tickSpacing() external view returns (int24);
 }
 
 
@@ -111,8 +139,27 @@ contract TickTest {
 	return IUniswapV3Pool(pool).liquidity();
     }
 
-    function check_ticks(int24[] _tickIdxs) public view returns (bool) {
+    struct Tick {
+	int128 liquidityNet;
+	bool initialized;
     }
+
+    function check_ticks(address _pool, int24 _tickIdx) public view returns (
+										 uint128,
+										 int128,
+										 uint256,
+										 uint256,
+										 int56,
+										 uint160,
+										 uint32,
+										 bool) {
+	return IUniswapV3Pool(_pool).ticks(_tickIdx);
+    }
+
+    /* function nextTick(address _pool, int24 _currentTick, int24 _tick_spacing, bool zeroForOne) public view returns (int24, bool) { */
+	
+    /* 	return TickBitmap.nextInitializedTickWithinOneWord(IUniswapV3Pool(_pool).tickBitmap(), _currentTick, _tick_spacing, zeroForOne);  */
+    /* } */
 
     function approveToken(address token, address to_be_approved) public {
 	IERC20(token).approve(to_be_approved, type(uint256).max);
@@ -158,6 +205,57 @@ contract TickTest {
 
     function sqrtPriceFromOutput(uint160 p, uint128 l, uint256 a, bool z) public pure returns (uint160 nextP) {
 	return SqrtPriceMath.getNextSqrtPriceFromOutput(p, l, a, z);
+    }
+
+    function tickFromPrice(uint160 price) public pure returns (int24) {
+	return TickMath.getTickAtSqrtRatio(price);
+    }
+
+    function position(int24 tick) private pure returns (int16 wordPos, uint8 bitPos) {
+        wordPos = int16(tick >> 8);
+        bitPos = uint8(tick % 256);
+    }
+
+    function nextInitializedTickWithinOneWord(
+					      address _pool,
+					      int24 tick,
+					      bool lte
+					      ) public view returns (int24 next, bool initialized) {
+	IUniswapV3Pool pool = IUniswapV3Pool(_pool);
+	int24 tickSpacing = pool.tickSpacing();
+        int24 compressed = tick / tickSpacing;
+        if (tick < 0 && tick % tickSpacing != 0) compressed--; // round towards negative infinity
+
+        if (lte) {
+            (int16 wordPos, uint8 bitPos) = position(compressed);
+            // all the 1s at or to the right of the current bitPos
+            uint256 mask = (1 << bitPos) - 1 + (1 << bitPos);
+            uint256 masked = pool.tickBitmap(wordPos) & mask;
+
+            // if there are no initialized ticks to the right of or at the current tick, return rightmost in the word
+            initialized = masked != 0;
+            // overflow/underflow is possible, but prevented externally by limiting both tickSpacing and tick
+            next = initialized
+                ? (compressed - int24(bitPos - BitMath.mostSignificantBit(masked))) * tickSpacing
+                : (compressed - int24(bitPos)) * tickSpacing;
+        } else {
+            // start from the word of the next tick, since the current tick state doesn't matter
+            (int16 wordPos, uint8 bitPos) = position(compressed + 1);
+            // all the 1s at or to the left of the bitPos
+            uint256 mask = ~((1 << bitPos) - 1);
+            uint256 masked = pool.tickBitmap(wordPos) & mask;
+
+            // if there are no initialized ticks to the left of the current tick, return leftmost in the word
+            initialized = masked != 0;
+            // overflow/underflow is possible, but prevented externally by limiting both tickSpacing and tick
+            next = initialized
+                ? (compressed + 1 + int24(BitMath.leastSignificantBit(masked) - bitPos)) * tickSpacing
+                : (compressed + 1 + int24(type(uint8).max - bitPos)) * tickSpacing;
+        }
+    }
+
+    function mulDiv(uint256 n1, uint256 n2, uint256 d) public pure returns (uint256) {
+	return FullMath.mulDiv(n1,n2,d);
     }
 
     
