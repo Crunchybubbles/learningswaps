@@ -2,18 +2,18 @@
 pragma solidity =0.7.6;
 pragma abicoder v2;
 
-import "Uniswap/v3-core@1.0.0/contracts/libraries/SafeCast.sol";
-import "Uniswap/v3-core@1.0.0/contracts/libraries/TickMath.sol";
-import "Uniswap/v3-core@1.0.0/contracts/libraries/TickBitmap.sol";
-import "Uniswap/v3-core@1.0.0/contracts/interfaces/IUniswapV3Pool.sol";
-import "Uniswap/v3-core@1.0.0/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
+import "uniswapV3_core/contracts/libraries/SafeCast.sol";
+import "uniswapV3_core/contracts/libraries/TickMath.sol";
+import "uniswapV3_core/contracts/libraries/TickBitmap.sol";
+import "uniswapV3_core/contracts/interfaces/IUniswapV3Pool.sol";
+import "uniswapV3_core/contracts/interfaces/callback/IUniswapV3SwapCallback.sol";
 
-import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/interfaces/IQuoterV2.sol";
-import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/base/PeripheryImmutableState.sol";
-import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/libraries/Path.sol";
-import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/libraries/PoolAddress.sol";
-import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/libraries/CallbackValidation.sol";
-import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/libraries/PoolTicksCounter.sol";
+import "uniswapV3_periphery/contracts/interfaces/IQuoterV2.sol";
+import "uniswapV3_periphery/contracts/base/PeripheryImmutableState.sol";
+import "uniswapV3_periphery/contracts/libraries/Path.sol";
+import "uniswapV3_periphery/contracts/libraries/PoolAddress.sol";
+import "uniswapV3_periphery/contracts/libraries/CallbackValidation.sol";
+import "uniswapV3_periphery/contracts/libraries/PoolTicksCounter.sol";
 
 /// @title Provides quotes for swaps
 /// @notice Allows getting the expected amount out or amount in for a given swap without executing the swap

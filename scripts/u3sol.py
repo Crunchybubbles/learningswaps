@@ -1,12 +1,9 @@
 import brownie
-from brownie import accounts, TickTest, Contract, interface, QuoterV2
+from brownie import accounts, TickTest, Contract, interface, QuoterV2, Router
 #from brownie.network import priority_fee
 import requests as r
 import math
 from collections import namedtuple
-
-
-
 
 
 class Uni3Pool:
@@ -234,10 +231,11 @@ def do_request(query):
     else:
         raise Exception(f'Failed with return code {req.status_code, query}')
     
-def getAllPools():
+
+def getAllUni3Pools():
     uni3pools = []
     query1 = """
-    {pools(first:1,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc) { 
+    {pools(first:1000,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc) { 
     id,
     token0 {id,symbol,decimals},
     token1{id,symbol,decimals},
@@ -249,7 +247,7 @@ def getAllPools():
     token0Price,
     token1Price
     tick,
-    ticks(first: 1000, orderBy:tickIdx, orderDirection:asc){
+    ticks(first: 1000, where:{liquidityNet_gt: 0}, orderBy:tickIdx, orderDirection:asc){
         tickIdx,
         liquidityNet,
         liquidityGross,
@@ -266,23 +264,115 @@ def getAllPools():
         uni3pools += [pool]
         #print(pool.keys())
     #print(uni3pools)
-    goOn = False
+    lastTime = uni3pools[-1]['createdAtTimestamp']
+    #print(lastTime)
+    #print(uni3pools[-1]['id'])
+    
+    goOn = True
     while goOn:
-        lastTime = uni3pools[-1]['createdAtTimestamp']
-        print(lastTime)
-        query2_1 = "{pools(first:1000,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc where:{createdAtTimestamp_gt:"
-        query2_3 = "}){id,token0{id,symbol,decimals},token1{id,symbol,decimals},feeTier,createdAtBlockNumber,createdAtTimestamp,liquidity,sqrtprice,token0Price,token1Price,tick,ticks(first: 1000, where: {liquidityNet_gt:0},orderBy:tickIdx, orderDirection:asc){id,tickIdx,liquidityNet,liquidityGross,price0,price1}}}"
-        query = query2_1 + lastTime + query2_3
+        #last = len(uni3pools) - 1
+        #lastTime = uni3pools[-1]['createdAtTimestamp']
+        #print(lastTime)
+#        print(uni3pools[-1])
+        #print(len(uni3pools))
+        #print(lastTime)
+        #print(uni3pools[-1]['id'])
+        query2_1 = """
+        {pools (
+            first:1000,
+            orderBy:createdAtTimestamp,
+            orderDirection:asc,
+            where:{liquidity_gt:0, createdAtTimestamp_gt:
+                   """
+        query2_3 = """
+            }){
+        id,
+        token0{id,symbol,decimals},
+        token1{id,symbol,decimals},
+        feeTier,
+        createdAtBlockNumber,
+        createdAtTimestamp,
+        liquidity,
+        sqrtPrice,
+        token0Price,
+        token1Price,
+        tick,
+        ticks(first: 1000, where:{liquidityNet_gt:0}, orderBy:tickIdx, orderDirection:asc){
+            tickIdx,
+            liquidityNet,
+            liquidityGross,
+            price0,
+            price1
+        }}}"""
+        query = query2_1 + uni3pools[-1]['createdAtTimestamp'] + query2_3
+        #print(query)
         requestN = do_request(query)
+#        print(requestN)
+#        print(requestN.keys())
         if requestN['data']['pools'] == []:
             #print(requestN)
             goOn = False
             break
+
         for pool in requestN['data']['pools']:
+            for tick in pool['ticks']:
+                price = getSqrtPriceFromTick(tick['tickIdx'])
+                tick['price'] = price
             uni3pools += [pool]
-    print(len(uni3pools))
+            
+        lastTime = uni3pools[-1]['createdAtTimestamp']
+#        print(uni3pools[-1])
     return uni3pools
 
+
+# def getAllUni3Pools_noTicks():
+#     uni3pools = []
+#     query1 = """
+#     {pools(first:1000,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc) { 
+#     id,
+#     token0 {id,symbol,decimals},
+#     token1{id,symbol,decimals},
+#     feeTier,
+#     createdAtBlockNumber,
+#     createdAtTimestamp,
+#     liquidity,
+#     sqrtPrice,
+#     token0Price,
+#     token1Price
+#     tick,
+#     }}
+#     """
+#     request1 = do_request(query1)
+#     for pool in request1['data']['pools']:
+#         uni3pools += [pool]
+#         #print(pool.keys())
+#     #print(uni3pools)
+#     lastTime = uni3pools[-1]['createdAtTimestamp']
+#     goOn = True
+#     while goOn:
+#         #last = len(uni3pools) - 1
+#         #lastTime = uni3pools[-1]['createdAtTimestamp']
+#         #print(lastTime)
+# #        print(uni3pools[-1])
+#         #print(len(uni3pools))
+#         #print(lastTime)
+#         print(uni3pools[-1]['id'])
+#         query2_1 = "{pools(first:1000,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc,where:{createdAtTimestamp_gt:"
+#         query2_3 = "}){id,token0{id,symbol,decimals},token1{id,symbol,decimals},feeTier,createdAtBlockNumber,createdAtTimestamp,liquidity,sqrtPrice,token0Price,token1Price,tick}}"
+#         query = query2_1 + uni3pools[-1]['createdAtTimestamp'] + query2_3
+#         requestN = do_request(query)
+# #        print(requestN)
+# #        print(requestN.keys())
+#         if requestN['data']['pools'] == []:
+#             #print(requestN)
+#             goOn = False
+#             break
+#         else:
+#             for pool in requestN['data']['pools']:
+#                 uni3pools += [pool]
+#             lastTime = uni3pools[-1]['createdAtTimestamp']
+# #        print(uni3pools[-1])
+#     return uni3pools
 
 
     
@@ -980,6 +1070,121 @@ def test_mulDiv(n1, n2, d):
     print(m)
     print(f"percent error {percent_error(m, r)}%")
     print("")
+
+
+YFI_ETH_V2_POOL = "0x2fdbadf3c4d5a8666bc06645b8358ab803996e28"
+
+YFI_ETH_V3_POOL = "0x04916039B1f59D9745Bf6E0a21f191D1e0A84287"
+DAI_ETH_V3_POOL = "0x60594a405d53811d3BC4766596EFD80fd545A270"
+YFI = "0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e"
+DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
+WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+
+MIN_SQRT_PRICE = 4295128740
+MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970341
+
+DAI_WHALE = "0x5d3a536e4d6dbd6114cc1ead35777bab948e3643"
+WETH_WHALE = "0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e"
+
+def get_token_from_whale(Token_addr, whale_addr, amount, recipient):
+    token = Contract(Token_addr)
+    print(f"{recipient} balance for {Token_addr} | {token.balanceOf(recipient)}")
+    token.transferFrom(whale_addr, recipient, amount, {"from": whale_addr})
+    print(f"{recipient} balance for {Token_addr} | {token.balanceOf(recipient)}")
+
+def test_v3_two_hops():
+    r = Router.deploy({"from": accounts[0]})
+    get_token_from_whale(DAI, DAI_WHALE, Contract(DAI).balanceOf(DAI_WHALE), accounts[0])
+    pool_type = 1
+    pool = DAI_ETH_V3_POOL
+    token0 = DAI
+    token1 = WETH
+    amountIn = 0
+    amountOut = 0
+    zeroForOne = True
+    amountSpecified = Contract(DAI).balanceOf(accounts[0])
+    sqrtPriceLimit = MIN_SQRT_PRICE
+
+
+    params1= (pool_type, pool, token0, token1, amountIn, amountOut, zeroForOne, amountSpecified, sqrtPriceLimit)
+
+
+    pool_type = 1
+    pool = YFI_ETH_V3_POOL
+    token0 = YFI
+    token1 = WETH
+    amountIn = 0
+    amountOut = 0
+    zeroForOne = False
+    amountSpecified = (10**18)
+    sqrtPriceLimit = MAX_SQRT_PRICE
+
+    
+    params2= (pool_type, pool, token0, token1, amountIn, amountOut, zeroForOne, amountSpecified, sqrtPriceLimit)
+    
+    params = [params1, params2]
+
+
+    Contract(WETH).approve(r.address, (2**256) - 1, {"from": accounts[0]})
+    Contract(DAI).approve(r.address, (2**256) - 1, {"from": accounts[0]})
+    r.swapAlongPath(params, {"from": accounts[0]})
+    
+def univ2_getAmountOut(amountIn, _pool, tokenIn):
+    pool = interface.IUniswapV2Pair(_pool)
+    token0 = pool.token0()
+    token1 = pool.token1()
+    reserves = pool.getReserves()
+    if tokenIn == token0:
+        reserveOut = reserves[1]
+        reserveIn = reserves[0]
+    elif tokenIn == token1:
+        reserveOut = reserves[0]
+        reserveIn = reserves[1]
+    amountInWithFee = amountIn * 977
+    numerator = amountInWithFee * reserveOut
+    denominator = (reserveIn * 1000) + amountInWithFee
+    return numerator // denominator
+    
+    
+def test_v2_v3():
+    r = Router.deploy({"from": accounts[0]})
+    token = WETH
+    whale = WETH_WHALE
+    get_token_from_whale(token, whale, Contract(token).balanceOf(whale), accounts[0])    
+    
+    pool_type = 0
+    pool = YFI_ETH_V2_POOL
+    token0 = YFI
+    token1 = WETH
+    amountIn = (10**19)
+    amountOut = univ2_getAmountOut(amountIn, pool, token)
+    zeroForOne = False
+    amountSpecified = 0
+    sqrtPriceLimit = 0
+
+
+    params1= (pool_type, pool, token0, token1, amountIn, amountOut, zeroForOne, amountSpecified, sqrtPriceLimit)
+
+
+    
+    pool_type = 1
+    pool = YFI_ETH_V3_POOL
+    token0 = YFI
+    token1 = WETH
+    amountIn = 0
+    amountOut = 0
+    zeroForOne = True
+    amountSpecified = (10**18)
+    sqrtPriceLimit = MIN_SQRT_PRICE
+
+    params2= (pool_type, pool, token0, token1, amountIn, amountOut, zeroForOne, amountSpecified, sqrtPriceLimit)
+
+    Contract(WETH).approve(r.address, (2**256) - 1, {"from": accounts[0]})
+    Contract(YFI).approve(r.address, (2**256) - 1, {"from": accounts[0]})
+    
+    params = [params1, params2]
+    r.swapAlongPath(params, {"from": accounts[0]})
+    
     
 def main():
     #priority_fee("2 gwei")
@@ -994,7 +1199,8 @@ def main():
     #data = getPools()
     #pools = data['data']['pool']
  #   print(pools)
-    uni3pools = getAllPools()
+    uni3pools = getAllUni3Pools()
+    print(len(uni3pools))
     #tick_check(uni3pools[0])
     #test_mulDiv((10**18), Q96, 217271867385839462693395)
     #testTick(uni3pools[0])
@@ -1010,33 +1216,33 @@ def main():
     #     amountIn = 10**i
     #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
     #     print(amountIn*10**-18, amountOut*10**-18)
-    a = 247
-    n = 18
-    #test_stuff(uni3pools, n, a)    
-    #quote_exactInSinglePool_oneForZero(uni3pools[0], n, a) 
-    # swap_test_uniToWeth(uni3pools[0],n,a)
-    bal, last_tick = swap_test(uni3pools[0],n,a)    
-    # print("oneForZero swap test")
-    tokenIn = uni3pools[0]["token1"]['id']
-    tokenOut = uni3pools[0]["token0"]['id']
-    # print(tokenIn, tokenOut)
-    # for i in range(18, 23):
+    # a = 247
+    # n = 18
+    # #test_stuff(uni3pools, n, a)    
+    # #quote_exactInSinglePool_oneForZero(uni3pools[0], n, a) 
+    # # swap_test_uniToWeth(uni3pools[0],n,a)
+    # bal, last_tick = swap_test(uni3pools[0],n,a)    
+    # # print("oneForZero swap test")
+    # tokenIn = uni3pools[0]["token1"]['id']
+    # tokenOut = uni3pools[0]["token0"]['id']
+    # # print(tokenIn, tokenOut)
+    # # for i in range(18, 23):
         
-    #     amountIn = 10**i
-    #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-    #     print(amountIn*10**-18, amountOut*10**-18)
-    amountIn = a*10**n
+    # #     amountIn = 10**i
+    # #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
+    # #     print(amountIn*10**-18, amountOut*10**-18)
+    # amountIn = a*10**n
 
-    amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-    print("my calculated amounts")
-    print(amountOut)
+    # amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
+    # print("my calculated amounts")
+    # print(amountOut)
 
-    print("real last tick", last_tick)
+    # print("real last tick", last_tick)
 
     
     
-    print(f"percent error {percent_error(amountOut, bal)}%")
-    #tick_check(uni3pools[0])
+    # print(f"percent error {percent_error(amountOut, bal)}%")
+    # #tick_check(uni3pools[0])
 
 
 

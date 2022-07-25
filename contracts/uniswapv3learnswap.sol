@@ -1,8 +1,8 @@
 pragma solidity ^0.8.7;
 pragma abicoder v2;
 
-import 'Uniswap/uniswap-v3-periphery@1.1.1/contracts/interfaces/ISwapRouter.sol';
-import 'Uniswap/uniswap-v3-periphery@1.1.1/contracts/libraries/TransferHelper.sol';
+import 'uniswapV3_periphery/contracts/interfaces/ISwapRouter.sol';
+import 'uniswapV3_periphery/contracts/libraries/TransferHelper.sol';
 
 contract SwapTest {
   // For the scope of these swap examples,

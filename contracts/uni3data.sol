@@ -1,7 +1,7 @@
 pragma solidity =0.7.6;
 pragma abicoder v2;
-import 'Uniswap/v3-core@1.0.0/contracts/libraries/TickBitmap.sol';
-import 'Uniswap/v3-core@1.0.0/contracts/libraries/TickMath.sol';
+import 'uniswapV3_core/contracts/libraries/TickBitmap.sol';
+import 'uniswapV3_core/contracts/libraries/TickMath.sol';
 //import 'Uniswap/uniswap-v3-core@1.0.0/contracts/interfaces/pool/IUniswapV3Pool.sol';
 
 

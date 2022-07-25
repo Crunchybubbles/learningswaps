@@ -1,12 +1,12 @@
 pragma solidity >=0.5.0 <0.8.0;
 pragma abicoder v2;
 
-import "Uniswap/v3-core@1.0.0/contracts/libraries/TickMath.sol";
-import "Uniswap/v3-core@1.0.0/contracts/libraries/BitMath.sol";
-import "Uniswap/v3-core@1.0.0/contracts/libraries/TickBitmap.sol";
-import "Uniswap/v3-core@1.0.0/contracts/libraries/SwapMath.sol";
-import "Uniswap/v3-core@1.0.0/contracts/libraries/FullMath.sol";
-import "Uniswap/v3-core@1.0.0/contracts/libraries/SqrtPriceMath.sol";
+import "uniswapV3_core/contracts/libraries/TickMath.sol";
+import "uniswapV3_core/contracts/libraries/BitMath.sol";
+import "uniswapV3_core/contracts/libraries/TickBitmap.sol";
+import "uniswapV3_core/contracts/libraries/SwapMath.sol";
+import "uniswapV3_core/contracts/libraries/FullMath.sol";
+import "uniswapV3_core/contracts/libraries/SqrtPriceMath.sol";
 //import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/libraries/Path.sol";
 //import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/interfaces/ISwapRouter.sol";
 //import "Openzeppelin/openzeppelin-contracts@3.0.0/contracts/token/ERC20/IERC20.sol";
