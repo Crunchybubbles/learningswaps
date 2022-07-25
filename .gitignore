@@ -4,4 +4,4 @@ __pycache__
 build/
 reports/
 .env
-brownie-config.yaml
+*.yaml
