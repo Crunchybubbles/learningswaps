@@ -4,6 +4,7 @@ from brownie import accounts, TickTest, Contract, interface, QuoterV2, Router
 import requests as r
 import math
 from collections import namedtuple
+import json
 
 
 class Uni3Pool:
@@ -1184,6 +1185,276 @@ def test_v2_v3():
     
     params = [params1, params2]
     r.swapAlongPath(params, {"from": accounts[0]})
+
+def save_uni3_data():
+    uni3pools = getAllUni3Pools()
+    f = open("uni3_data.txt", "w")
+    f.write(json.dumps(uni3pools))
+    f.close()
+
+def load_uni3_data():
+    f = open("uni3_data.txt")
+    info = json.load(f)
+    f.close()
+    return info
+
+# def pools_for_token(token, uni3pools, uni2pools):
+#     pools = []
+#     for pool in uni3pools:
+#         if (pool['token0']['id'] == token) or (pool['token1']['id'] == token):
+#             pools += [pool['id']]
+#     for pool in uni2pools:
+#         if (pool['token0']['id'] == token) or (pool['token1']['id'] == token):
+#             pools += [pool['id']]
+#     token_to_pools = {}
+#     token_to_pools[token] = pools
+
+def token_to_pools(uni3pools):
+    ttp = {}
+    for p in uni3pools:
+        pool = p['id']
+        token0 = p['token0']['id']
+        token1 = p['token1']['id']
+
+        
+        
+        if token0 in ttp:
+            if pool not in ttp[token0]:
+                ttp[token0] += [pool]
+        else:
+            ttp[token0] = [pool]
+
+        if token1 in ttp:
+            if pool not in ttp[token1]:
+                ttp[token1] += [pool]
+        else:
+            ttp[token1] = [pool]
+    # for p in uni2pools:
+    #      if p['token0']['id'] in ttp:
+    #         if p['id'] not in ttp[p['token0']['id']]:
+    #             ttp[p['token0']['id']] += [p['id']]
+    #     else:
+    #         ttp[p['token0']['id']] += [p['id']]
+
+    #     if p['token1']['id'] in ttp:
+    #         if p['id'] not in ttp[p['token1']['id']]:
+    #             ttp[p['token1']['id']] += [p['id']]
+    #     else:
+    #         ttp[p['token1']['id']] += [p['id']]
+    return ttp
+
+def pool_to_data(uni3pools):
+    d = {}
+    for pool in uni3pools:
+          d[pool['id']] = pool
+    return d
+
+def find_next_market_and_next_token(pools_already_done, curent_token, token_to_pool_dic, pooldata):
+    potential_pools = token_to_pool_dic[curent_token]
+    next_pool = ""
+    next_token = ""
+    for pool in potential_pools:
+        if pool not in pools_already_done:
+            next_pool = pool
+            if curent_token == pooldata[pool]['token0']['id']:
+                next_token = pooldata[pool]['token1']['id']
+            if curent_token == pooldata[pool]['token1']['id']:
+                next_token = pooldata[pool]['token0']['id']
+            break
+    return next_pool, next_token
+    
+    
+
+def token_out(tokenIn, pooladdr, pooldata):
+    token0 = pooldata[pooladdr]['token0']['id']
+    token1 = pooldata[pooladdr]['token1']['id']
+
+    if tokenIn == token0:
+        return token1
+    if tokenIn == token1:
+        return token0
+
+
+def find_paths(token_to_pools, pooldata):
+    loops = {}
+    for token, pools in token_to_pools.items():
+        for pool in pools:
+            tokenOut = token_out(token, pool, pooldata)
+            used_pools = []
+            used_pools += [pool]
+            next_pool1, next_token1 = find_next_market_and_next_token(used_pools, tokenOut, token_to_pools, pooldata)
+            used_pools += [next_pool1]
+            if next_pool1 != "" and next_token1 != "":
+                if token == next_token1:
+                    if token not in loops:
+                        loops[token] = [used_pools]
+                    else:
+                        if used_pools not in loops[token]:
+                            loops[token] += [used_pools]
+                else:
+                            
+                
+                
+                
+                    next_pool2, next_token2 = find_next_market_and_next_token(used_pools, next_token1, token_to_pools, pooldata)
+                    used_pools += [next_pool2]
+                    if next_pool2 != "" and next_token2 != "":
+                        if token == next_token2:
+                            if token not in loops:
+                                loops[token] = [used_pools]
+                            else:
+                                if used_pools not in loops[token]:
+                                
+                                    loops[token] += [used_pools]
+                        else:
+                            next_pool3, next_token3 = find_next_market_and_next_token(used_pools, next_token2, token_to_pools, pooldata)
+                            used_pools += [next_pool3]
+                            if next_pool3 != "" and next_token3 != "":
+                                if token not in loops:
+                                    loops[token] = [used_pools]
+                                else:
+                                    if used_pools not in loops[token]:
+                                        loops[token] += [used_pools]
+    return loops
+    
+    
+
+
+def level_one(token_to_pools, pooldata):
+    level = {}
+    for token, pools in token_to_pools.items():
+        tokens = []
+        for pool in pools:
+            tokens += [token_out(token, pool, pooldata)]
+        level[token] = tokens
+    return level
+
+def level_two(levelOne, token_to_pools, pooldata):
+    lone = levelOne
+    for k, tokens in levelOne.items():
+        level = {}
+        for token in tokens:
+            pools = token_to_pools[token]
+            tokensOut = []
+            for pool in pools:
+                tokensOut += [token_out(token, pool, pooldata)]
+            level[token] = tokensOut
+        lone[k] = level
+                
+
+def find_loops(token_to_pools, pooldata, used_pools):
+    for token, pools in token_to_pools.items():
+        usedPools = {}
+        for pool in pools:
+            usedPools[pool] = True
+            
+            
+        
+def get_paths(token_to_pools, pooldata):
+    paths = {}
+    for token, pools in token_to_pools.items():
+        for pool in pools:
+            tokenOut1 = token_out(token, pool, pooldata)
+            new_pools1 = token_to_pools[tokenOut1]
+            for pool1 in new_pools1:
+                if pool1 != pool:
+                    tokenOut2 = token_out(tokenOut1, pool1, pooldata)
+                    if tokenOut2 == token:
+                        if token not in paths:
+                            paths[token] = [((token, pool), (tokenOut1, pool1))]
+                        else:
+                            paths[token] += [((token, pool), (tokenOut1, pool1))]
+                    else:
+                        new_pools2 = token_to_pools[tokenOut2]
+                        for pool2 in new_pools2:
+                            if pool != pool2 and pool1 != pool2:
+                                tokenOut3 = token_out(tokenOut2, pool2, pooldata)
+                                if tokenOut3 == token:
+                                    if token not in paths:
+                                        paths[token] = [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
+                                    else:
+                                        paths[token] += [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
+    return paths   
+            #children[pool] = tokenOut
+            #{token:{pool:tokenOut}}
+        #root[token] = children
+        
+        #{token:{pool1:{pool2:tokenOut}}}    
+            
+        
+    
+
+
+# def find_closed_loops(token_to_pools, pooldata):
+#     loops = {}
+#     for token, pools in token_to_pools.items():
+#         for pool in pools:
+#             path = []
+#             tokens = []
+#             tokens += [token]
+#             path += [pool]
+
+#             token0 = pooldata[pool]['token0']['id']
+#             token1 = pooldata[pool]['token1']['id']
+            
+            
+#             if token0 == token:
+#                 tokenOut = token1
+                
+#             if token1 == token:
+#                 tokenOut = token0
+#             tokens += [tokenOut]
+#             next_pool, next_token = find_next_market_and_next_token(path, tokenOut, token_to_pools, pooldata)
+#             if next_pool == "":
+#                 break
+
+#             tokens += [next_token]
+#             path += [next_pool]
+
+#             if next_token == token:
+#                 if token in loops:
+#                     loops[token] += [{"path": path, "tokens": tokens}]
+#                 else:
+#                     loops[token] = [{"path": path, "tokens": tokens}]
+
+#             tokens = tokens[:-1]
+#             path = path[:-1]
+            
+            
+
+            
+                
+
+            
+
+
+#             for i in range(10):
+                
+
+                
+#                 next_pool, next_token = find_next_market_and_next_token(path, tokens[-1], token_to_pools, pooldata)
+
+                
+
+            # for np in token_to_pools[next_token]:
+            #     token0 = pooldata[np]['token0']['id']
+            #     token1 = pooldata[np]['token1']['id']
+def save_paths():
+    uni3pools = load_uni3_data()
+    token_to_pool_dic = token_to_pools(uni3pools)
+    pool_to_data_dic = pool_to_data(uni3pools)
+    paths = get_paths(token_to_pool_dic, pool_to_data_dic)
+    f = open("paths.txt", "w")
+    f.write(json.dumps(paths))
+    f.close()
+
+def load_paths():
+    f = open("paths.txt")
+    info = json.load(f)
+    f.close()
+    return info  
+            
+                
     
     
 def main():
@@ -1199,8 +1470,45 @@ def main():
     #data = getPools()
     #pools = data['data']['pool']
  #   print(pools)
-    uni3pools = getAllUni3Pools()
-    print(len(uni3pools))
+    #uni3pools = getAllUni3Pools()
+
+    #save_uni3_data()
+    uni3pools = load_uni3_data()
+    # # for p in uni3pools:
+    # #     print(p)
+    token_to_pool_dic = token_to_pools(uni3pools)
+    pool_to_data_dic = pool_to_data(uni3pools)
+    paths = find_paths(token_to_pool_dic, pool_to_data_dic)
+    for k,v in paths.items():
+        print(k)
+        for l in v:
+            print(l)
+    # save_paths()
+    # paths = load_paths()
+    # #paths = get_paths(token_to_pool_dic, pool_to_data_dic)
+    # for k, v in paths.items():
+    #     print(k)
+    #     print(v)
+    #     #################################print(len(v))
+    #     for path in v:
+    #         print("")
+    #         print(path[:][0])
+    #         print(path[:][1])
+    #         break
+    #     break
+        
+       # break
+    # for k, v in paths.items():
+    #     print("")
+    #     print("loops for token", k)
+    #     for l in v:
+    #         print("")
+    #         print(len(l))
+    #         print(l)
+    
+    # print(uni3pools[0]['id'])
+    # print(uni3pools[-1]['id'])
+    # print(len(uni3pools))
     #tick_check(uni3pools[0])
     #test_mulDiv((10**18), Q96, 217271867385839462693395)
     #testTick(uni3pools[0])
