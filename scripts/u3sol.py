@@ -1274,7 +1274,7 @@ def token_out(tokenIn, pooladdr, pooldata):
     if tokenIn == token1:
         return token0
 
-
+#this one is working i think
 def find_paths(token_to_pools, pooldata):
     loops = {}
     for token, pools in token_to_pools.items():
@@ -1292,10 +1292,6 @@ def find_paths(token_to_pools, pooldata):
                         if used_pools not in loops[token]:
                             loops[token] += [used_pools]
                 else:
-                            
-                
-                
-                
                     next_pool2, next_token2 = find_next_market_and_next_token(used_pools, next_token1, token_to_pools, pooldata)
                     used_pools += [next_pool2]
                     if next_pool2 != "" and next_token2 != "":
@@ -1310,71 +1306,82 @@ def find_paths(token_to_pools, pooldata):
                             next_pool3, next_token3 = find_next_market_and_next_token(used_pools, next_token2, token_to_pools, pooldata)
                             used_pools += [next_pool3]
                             if next_pool3 != "" and next_token3 != "":
-                                if token not in loops:
-                                    loops[token] = [used_pools]
+                                if token == next_token3:
+                                    if token not in loops:
+                                        loops[token] = [used_pools]
+                                    else:
+                                        if used_pools not in loops[token]:
+                                            loops[token] += [used_pools]
                                 else:
-                                    if used_pools not in loops[token]:
-                                        loops[token] += [used_pools]
+                                    next_pool4, next_token4 = find_next_market_and_next_token(used_pools, next_token3, token_to_pools, pooldata)
+                                    used_pools += [next_pool4]
+                                    if next_pool4 != "" and next_token4 != "":
+                                        if token == next_token4:
+                                            if token not in loops:
+                                                loops[token] = [used_pools]
+                                            else:
+                                                if used_pools not in loops[token]:
+                                                    loops[token] += [used_pools]
     return loops
     
     
 
 
-def level_one(token_to_pools, pooldata):
-    level = {}
-    for token, pools in token_to_pools.items():
-        tokens = []
-        for pool in pools:
-            tokens += [token_out(token, pool, pooldata)]
-        level[token] = tokens
-    return level
+# def level_one(token_to_pools, pooldata):
+#     level = {}
+#     for token, pools in token_to_pools.items():
+#         tokens = []
+#         for pool in pools:
+#             tokens += [token_out(token, pool, pooldata)]
+#         level[token] = tokens
+#     return level
 
-def level_two(levelOne, token_to_pools, pooldata):
-    lone = levelOne
-    for k, tokens in levelOne.items():
-        level = {}
-        for token in tokens:
-            pools = token_to_pools[token]
-            tokensOut = []
-            for pool in pools:
-                tokensOut += [token_out(token, pool, pooldata)]
-            level[token] = tokensOut
-        lone[k] = level
+# def level_two(levelOne, token_to_pools, pooldata):
+#     lone = levelOne
+#     for k, tokens in levelOne.items():
+#         level = {}
+#         for token in tokens:
+#             pools = token_to_pools[token]
+#             tokensOut = []
+#             for pool in pools:
+#                 tokensOut += [token_out(token, pool, pooldata)]
+#             level[token] = tokensOut
+#         lone[k] = level
                 
 
-def find_loops(token_to_pools, pooldata, used_pools):
-    for token, pools in token_to_pools.items():
-        usedPools = {}
-        for pool in pools:
-            usedPools[pool] = True
+# def find_loops(token_to_pools, pooldata, used_pools):
+#     for token, pools in token_to_pools.items():
+#         usedPools = {}
+#         for pool in pools:
+#             usedPools[pool] = True
             
             
         
-def get_paths(token_to_pools, pooldata):
-    paths = {}
-    for token, pools in token_to_pools.items():
-        for pool in pools:
-            tokenOut1 = token_out(token, pool, pooldata)
-            new_pools1 = token_to_pools[tokenOut1]
-            for pool1 in new_pools1:
-                if pool1 != pool:
-                    tokenOut2 = token_out(tokenOut1, pool1, pooldata)
-                    if tokenOut2 == token:
-                        if token not in paths:
-                            paths[token] = [((token, pool), (tokenOut1, pool1))]
-                        else:
-                            paths[token] += [((token, pool), (tokenOut1, pool1))]
-                    else:
-                        new_pools2 = token_to_pools[tokenOut2]
-                        for pool2 in new_pools2:
-                            if pool != pool2 and pool1 != pool2:
-                                tokenOut3 = token_out(tokenOut2, pool2, pooldata)
-                                if tokenOut3 == token:
-                                    if token not in paths:
-                                        paths[token] = [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
-                                    else:
-                                        paths[token] += [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
-    return paths   
+# def get_paths(token_to_pools, pooldata):
+#     paths = {}
+#     for token, pools in token_to_pools.items():
+#         for pool in pools:
+#             tokenOut1 = token_out(token, pool, pooldata)
+#             new_pools1 = token_to_pools[tokenOut1]
+#             for pool1 in new_pools1:
+#                 if pool1 != pool:
+#                     tokenOut2 = token_out(tokenOut1, pool1, pooldata)
+#                     if tokenOut2 == token:
+#                         if token not in paths:
+#                             paths[token] = [((token, pool), (tokenOut1, pool1))]
+#                         else:
+#                             paths[token] += [((token, pool), (tokenOut1, pool1))]
+#                     else:
+#                         new_pools2 = token_to_pools[tokenOut2]
+#                         for pool2 in new_pools2:
+#                             if pool != pool2 and pool1 != pool2:
+#                                 tokenOut3 = token_out(tokenOut2, pool2, pooldata)
+#                                 if tokenOut3 == token:
+#                                     if token not in paths:
+#                                         paths[token] = [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
+#                                     else:
+#                                         paths[token] += [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
+#     return paths   
             #children[pool] = tokenOut
             #{token:{pool:tokenOut}}
         #root[token] = children
@@ -1443,7 +1450,7 @@ def save_paths():
     uni3pools = load_uni3_data()
     token_to_pool_dic = token_to_pools(uni3pools)
     pool_to_data_dic = pool_to_data(uni3pools)
-    paths = get_paths(token_to_pool_dic, pool_to_data_dic)
+    paths = find_paths(token_to_pool_dic, pool_to_data_dic)
     f = open("paths.txt", "w")
     f.write(json.dumps(paths))
     f.close()
@@ -1471,18 +1478,19 @@ def main():
     #pools = data['data']['pool']
  #   print(pools)
     #uni3pools = getAllUni3Pools()
-
+    save_paths()
     #save_uni3_data()
-    uni3pools = load_uni3_data()
-    # # for p in uni3pools:
-    # #     print(p)
-    token_to_pool_dic = token_to_pools(uni3pools)
-    pool_to_data_dic = pool_to_data(uni3pools)
-    paths = find_paths(token_to_pool_dic, pool_to_data_dic)
-    for k,v in paths.items():
-        print(k)
-        for l in v:
-            print(l)
+    # uni3pools = load_uni3_data()
+    # # # for p in uni3pools:
+    # # #     print(p)
+    # token_to_pool_dic = token_to_pools(uni3pools)
+    # pool_to_data_dic = pool_to_data(uni3pools)
+    # paths = find_paths(token_to_pool_dic, pool_to_data_dic)
+    # for k,v in paths.items():
+    #     print("")
+    #     print(k)
+    #     for l in v:
+    #         print(l)
     # save_paths()
     # paths = load_paths()
     # #paths = get_paths(token_to_pool_dic, pool_to_data_dic)
