@@ -7,6 +7,9 @@ from collections import namedtuple
 import json
 
 
+
+
+
 class Uni3Pool:
     def __init__(self, query):
         self.address = query['id']
@@ -581,8 +584,8 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
         amountOut = 0
         feeAmount = 0
         return (price_current, amountIn, amountOut, feeAmount)
-    print("price_targetss", price_target)
-    print("price_currentss", price_current)
+#    print("price_targetss", price_target)
+#    print("price_currentss", price_current)
 #    print(price_current >= price_target)
 #    print("zf1",zeroForOne)
 #    print("exactIn", exactIn)
@@ -607,7 +610,7 @@ def computeSwapStep(price_current, price_target, liquidity, amount_remaining, fe
         else:
             price_next = getNextPriceFromOutput(price_current, liquidity, amount_remaining, zeroForOne)
 #        print("amountOut", amountOut)
-    print("price_next",price_next)
+#    print("price_next",price_next)
     is_max = price_target == price_next
 #    print("2 pn, pt", price_next, price_target)
     if zeroForOne:
@@ -753,6 +756,8 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
         return "these tokens arnt in this pool"
     #print(zeroForOne)
     current_tick = int(uni3pool['tick'])
+    index = 0
+    prev_i = 0
     for i, tick in enumerate(uni3pool['ticks']):
         if current_tick > int(tick['tickIdx']):
             prev_i = i
@@ -771,10 +776,11 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
     ticksCrossed = 0
     length = len(uni3pool['ticks'])
 #    amount_calculated = 0
-    print("amount remaining",amount_remaining)
-    print("start tick", current_tick)
-    print("")
-    while amount_remaining != 0:
+#    print("amount remaining",amount_remaining)
+#    print("start tick", current_tick)
+#    print("")
+    count = 0
+    while amount_remaining != 0 or count < 1000:
         price_start = price_current
         if zeroForOne:
             if (index - ticksCrossed) < 0:
@@ -795,16 +801,16 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
         amount_remaining -= (amountIn + feeAmount)
         #amount_calculated -= amountOut
         out += amountOut
-        print("remaining",amount_remaining)
-        if amount_remaining <= 0:
-            print("")
-            print("numbers at amount_remaining <= 0")
-            print("price_current", price_current)
-            print("liquidity", liquidity)
-            print("tick", uni3pool['ticks'][tickIndex]['tickIdx'])
-            print("calculated tick price_current", getTickAtSqrt(price_current))
-            print("liquidity", liquidity)
-            break
+        #print("remaining",amount_remaining)
+        # if amount_remaining <= 0:
+        #     print("")
+        #     print("numbers at amount_remaining <= 0")
+        #     print("price_current", price_current)
+        #     print("liquidity", liquidity)
+        #     print("tick", uni3pool['ticks'][tickIndex]['tickIdx'])
+        #     print("calculated tick price_current", getTickAtSqrt(price_current))
+        #     print("liquidity", liquidity)
+        #     break
         #price_current = price_next
 
         if price_current == price_next_tick:
@@ -815,17 +821,18 @@ def v3swapExactIn(uni3pool, tokenIn, tokenOut, initialAmountIn):
                 liquidityNet = int(tick_next['liquidityNet'])
             liquidity = addDelta(liquidity, liquidityNet)
             ticksCrossed += 1
+        count += 1
         # elif price_current != price_start:
         #     tick_next = tickFromPrice(price_current)
             
             
             #tick_current = getTickAtSqrt(price_current)
             #price_current = getSqrtPriceFromTick(tick_current)
-            print("liquidityNet", liquidityNet)
-            print("liquidity", liquidity)
+            # print("liquidityNet", liquidityNet)
+            # print("liquidity", liquidity)
             
-            print("crossed tick")
-            print("")
+            # print("crossed tick")
+            # print("")
 
             
 
@@ -1274,6 +1281,39 @@ def token_out(tokenIn, pooladdr, pooldata):
     if tokenIn == token1:
         return token0
 
+def _calc_params(path_of_pool_addr):
+    return path_of_pool_addr
+    
+def searcher(first_token, current_token, loops, used_pools, token_to_pools, pooldata): 
+    next_pool, next_token = find_next_market_and_next_token(used_pools, current_token, token_to_pools, pooldata)
+    used_pools += [next_pool]
+    if next_pool != "" and next_token != "":
+        if next_token == first_token:
+            if first_token not in loops:
+                loops[first_token] = [_calc_params(used_pools)]
+            else:
+                params = _calc_params(used_pools)
+                if params not in loops[first_token]:
+                    loops[first_token] += [params]
+        else:
+            
+            searcher(first_token, next_token, loops, used_pools, token_to_pools, pooldata)
+    else:
+        pass
+
+ #recusion is better and is working           
+def path_search(token_to_pools, pooldata):
+    loops = {}
+    for token, pools in token_to_pools.items():
+        for pool in pools:
+            tokenOut = token_out(token, pool, pooldata)
+            used_pools = []
+            used_pools += [pool]
+            searcher(token, tokenOut, loops, used_pools, token_to_pools, pooldata)
+    return loops
+    
+    
+
 #this one is working i think
 def find_paths(token_to_pools, pooldata):
     loops = {}
@@ -1322,6 +1362,28 @@ def find_paths(token_to_pools, pooldata):
                                             else:
                                                 if used_pools not in loops[token]:
                                                     loops[token] += [used_pools]
+                                        else:
+                                            next_pool5, next_token5 = find_next_market_and_next_token(used_pools, next_token4, token_to_pools, pooldata)
+                                            used_pools += [next_pool5]
+                                            if next_pool5 != "" and next_token5 != "":
+                                                if token == next_token5:
+                                                    if token not in loops:
+                                                        loops[token] = [used_pools]
+                                                    else:
+                                                        if used_pools not in loops[token]:
+                                                            loops[token] += [used_pools]
+                                                else:
+                                                    next_pool6, next_token6 = find_next_market_and_next_token(used_pools, next_token5, token_to_pools, pooldata)
+                                                    used_pools += [next_pool6]
+                                                    if next_pool6 != "" and next_token6 != "":
+                                                        if token == next_token6:
+                                                            if token not in loops:
+                                                                loops[token] = [used_pools]
+                                                            else:
+                                                                if used_pools not in loops[token]:
+                                                                    loops[token] += [used_pools]
+                                                    
+                                                    
     return loops
     
     
@@ -1459,9 +1521,64 @@ def load_paths():
     f = open("paths.txt")
     info = json.load(f)
     f.close()
-    return info  
-            
+    return info
+
+def swaploop(loops, pooldata, initialIn):
+    profit = {}
+    for token, paths in loops.items():
+        for path in paths:
+            tokenIn = token
+            tokenOut = token_out(tokenIn, path[0], pooldata)
+            amountIn = initialIn
+            for k, pool in enumerate(path):
+                outputAmount = v3swapExactIn(pooldata[pool], tokenIn, tokenOut, amountIn)
+                tokenIn = tokenOut
+                try:
+                    tokenOut = token_out(tokenIn, path[k + 1], pooldata)
+                except IndexError:
+                    if token not in profit:
+                        profit[token] = [outputAmount - initialIn]
+                    else:
+                        profit[token] += [outputAmount - initialIn]
+                    print(outputAmount - initialIn)
+                    print(path)
+                    print("")
+                    
+                amountIn = outputAmount
+
+
+def starting_ending_token_test(_paths, pooldata):
+    for token, paths in _paths.items():
+        for path in paths:
+            start_pool = path[0]
+            end_pool = path[-1]
+            start_pool_token0 = pooldata[start_pool]['token0']['id']
+            start_pool_token1 = pooldata[start_pool]['token1']['id']
+            end_pool_token0 = pooldata[end_pool]['token0']['id']
+            end_pool_token1 = pooldata[end_pool]['token1']['id']
+            if (start_pool_token0 == end_pool_token0 or start_pool_token0 == end_pool_token1) or (start_pool_token1 == end_pool_token0 or start_pool_token1 == end_pool_token1):
+                pass
+            else:
+                print(token, path, "bad")
+
+
                 
+def path_info_and_checks(paths, pooldata):
+    starting_ending_token_test(_paths, pooldata)
+
+    loopcount = 0
+    looplen = 0
+    for k,v in paths.items():
+        print("")
+        print(k)
+        for l in v:
+            loopcount += 1
+            looplen += len(l)
+        avelooplen = looplen / loopcount
+        print(avelooplen)
+        avelooplen = 0
+    print(loopcount)
+    
     
     
 def main():
@@ -1478,19 +1595,37 @@ def main():
     #pools = data['data']['pool']
  #   print(pools)
     #uni3pools = getAllUni3Pools()
-    save_paths()
+    #save_paths()
+    
     #save_uni3_data()
-    # uni3pools = load_uni3_data()
+    uni3pools = load_uni3_data()
     # # # for p in uni3pools:
     # # #     print(p)
-    # token_to_pool_dic = token_to_pools(uni3pools)
-    # pool_to_data_dic = pool_to_data(uni3pools)
-    # paths = find_paths(token_to_pool_dic, pool_to_data_dic)
+    token_to_pool_dic = token_to_pools(uni3pools)
+    pool_to_data_dic = pool_to_data(uni3pools)
+    #paths = find_paths(token_to_pool_dic, pool_to_data_dic)
+    #profit = swaploop(paths, pool_to_data_dic, (10**18))
+    paths = path_search(token_to_pool_dic, pool_to_data_dic)
+
+    d1 = pool_to_data_dic['0x632e675672f2657f227da8d9bb3fe9177838e726']
+    d2 = pool_to_data_dic['0xe3ee7ca56b5ae12876df64dc4017c873f91bdd6e']
+    data = [d1,d2]
+    for d in data:
+        for k, v in d.items():
+            print("")
+            print(k)
+            print(v)
+        
+    #profit = swaploop(paths, pool_to_data_dic, 10000)
+    #print(profit)
     # for k,v in paths.items():
     #     print("")
     #     print(k)
     #     for l in v:
-    #         print(l)
+    #         print(len(l))
+
+
+
     # save_paths()
     # paths = load_paths()
     # #paths = get_paths(token_to_pool_dic, pool_to_data_dic)
