@@ -7,6 +7,9 @@ import "uniswapV3_core/contracts/libraries/TickBitmap.sol";
 import "uniswapV3_core/contracts/libraries/SwapMath.sol";
 import "uniswapV3_core/contracts/libraries/FullMath.sol";
 import "uniswapV3_core/contracts/libraries/SqrtPriceMath.sol";
+import "uniswapV3_core/contracts/libraries/LiquidityMath.sol";
+import "uniswapV3_core/contracts/libraries/LowGasSafeMath.sol";
+import "uniswapV3_core/contracts/libraries/SafeCast.sol";
 //import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/libraries/Path.sol";
 //import "Uniswap/uniswap-v3-periphery@1.3.0/contracts/interfaces/ISwapRouter.sol";
 //import "Openzeppelin/openzeppelin-contracts@3.0.0/contracts/token/ERC20/IERC20.sol";
@@ -78,8 +81,13 @@ interface IUniswapV3Pool {
 						      );
     function tickBitmap(int16 wordPosition) external view returns (uint256);
     function tickSpacing() external view returns (int24);
+    function fee() external view returns (uint24);
 }
 
+interface IUni2Pool {
+    function getReserves() external view returns (uint112, uint112, uint32);
+    
+}
 
 interface ISwapRouter {
     struct ExactInputSingleParams {
@@ -258,7 +266,266 @@ contract TickTest {
 	return FullMath.mulDiv(n1,n2,d);
     }
 
+    function _liqNet(IUniswapV3Pool pool, int24 _tickNext) internal view returns (int128) {
+	uint128 liquidityGross;
+	int128 liquidityNet;
+	uint256 feeGrowthOutside0X128;
+	uint256 feeGrowthOutside1X128;
+	int56 tickCumulativeOutside;
+	uint160 secondsPerLiquidityOutsideX128;
+	uint32 secondsOutside;
+	bool initialized;
+		    
+		    
+	(liquidityGross, liquidityNet, feeGrowthOutside0X128, feeGrowthOutside1X128, tickCumulativeOutside, secondsPerLiquidityOutsideX128, secondsOutside, initialized) =  pool.ticks(_tickNext);
+	return liquidityNet;
+    }
+
+
+    // the top level state of the swap, the results of which are recorded in storage at the end
+    struct SwapState {
+        // the amount remaining to be swapped in/out of the input/output asset
+        int256 amountSpecifiedRemaining;
+        // the amount already swapped out/in of the output/input asset
+        int256 amountCalculated;
+        // current sqrt(price)
+        uint160 sqrtPriceX96;
+        // the tick associated with the current price
+        int24 tick;
+        // the global fee growth of the input token
+        // amount of input token paid as protocol fee
+        uint128 protocolFee;
+        // the current liquidity in range
+        uint128 liquidity;
+    }
+
+    struct StepComputations {
+        // the price at the beginning of the step
+        uint160 sqrtPriceStartX96;
+        // the next tick to swap to from the current tick in the swap direction
+        int24 tickNext;
+        // whether tickNext is initialized or not
+        bool initialized;
+        // sqrt(price) for the next tick (1/0)
+        uint160 sqrtPriceNextX96;
+        // how much is being swapped in in this step
+        uint256 amountIn;
+        // how much is being swapped out
+        uint256 amountOut;
+        // how much fee is being paid in
+        uint256 feeAmount;
+    }
+    using LowGasSafeMath for uint256;
+    using LowGasSafeMath for int256;
+    using SafeCast for uint256;
+    using SafeCast for int256;
+  
+    function calc_v3_swap(
+		  address _pool,
+		  bool zeroForOne,
+		  int256 amountSpecified,
+		  uint160 sqrtPriceLimitX96
+		  ) public view returns (int256 amount0, int256 amount1) {
+        require(amountSpecified != 0, 'AS');
+
+	IUniswapV3Pool pool = IUniswapV3Pool(_pool);
+	uint24 fee = pool.fee();
+	
+        IUniswapV3Pool.Slot0 memory slot0Start = pool.slot0() ;
+
+        require(slot0Start.unlocked, 'LOK');
+        require(
+            zeroForOne
+                ? sqrtPriceLimitX96 < slot0Start.sqrtPriceX96 && sqrtPriceLimitX96 > TickMath.MIN_SQRT_RATIO
+                : sqrtPriceLimitX96 > slot0Start.sqrtPriceX96 && sqrtPriceLimitX96 < TickMath.MAX_SQRT_RATIO,
+            'SPL'
+        );
+
+        bool exactInput = amountSpecified > 0;
+
+        SwapState memory state =
+            SwapState({
+                amountSpecifiedRemaining: amountSpecified,
+                amountCalculated: 0,
+                sqrtPriceX96: slot0Start.sqrtPriceX96,
+                tick: slot0Start.tick,
+                protocolFee: 0,
+                liquidity: pool.liquidity()
+            });
+
+        // continue swapping as long as we haven't used the entire input/output and haven't reached the price limit
+        while (state.amountSpecifiedRemaining != 0 && state.sqrtPriceX96 != sqrtPriceLimitX96) {
+            StepComputations memory step;
+
+            step.sqrtPriceStartX96 = state.sqrtPriceX96;
+	    // replace this with function call 
+            (step.tickNext, step.initialized) = nextInitializedTickWithinOneWord(
+										 _pool,
+										 state.tick,
+										 zeroForOne
+            );
+
+            // ensure that we do not overshoot the min/max tick, as the tick bitmap is not aware of these bounds
+            if (step.tickNext < TickMath.MIN_TICK) {
+                step.tickNext = TickMath.MIN_TICK;
+            } else if (step.tickNext > TickMath.MAX_TICK) {
+                step.tickNext = TickMath.MAX_TICK;
+            }
+
+            // get the price for the next tick
+            step.sqrtPriceNextX96 = TickMath.getSqrtRatioAtTick(step.tickNext);
+
+            // compute values to swap to the target tick, price limit, or point where input/output amount is exhausted
+            (state.sqrtPriceX96, step.amountIn, step.amountOut, step.feeAmount) = SwapMath.computeSwapStep(
+                state.sqrtPriceX96,
+                (zeroForOne ? step.sqrtPriceNextX96 < sqrtPriceLimitX96 : step.sqrtPriceNextX96 > sqrtPriceLimitX96)
+                    ? sqrtPriceLimitX96
+                    : step.sqrtPriceNextX96,
+                state.liquidity,
+                state.amountSpecifiedRemaining,
+                fee
+            );
+
+            if (exactInput) {
+                state.amountSpecifiedRemaining -= int256(step.amountIn + step.feeAmount);
+                state.amountCalculated = state.amountCalculated.sub(int256(step.amountOut));
+            } else {
+                state.amountSpecifiedRemaining += int256(step.amountOut);
+                state.amountCalculated = state.amountCalculated.add(int256(step.amountIn + step.feeAmount));
+            }
+
+            // shift tick if we reached the next price
+            if (state.sqrtPriceX96 == step.sqrtPriceNextX96) {
+                // if the tick is initialized, run the tick transition
+                if (step.initialized) {
+
+		    int128 liquidityNet = _liqNet(pool, step.tickNext);
+                    // if we're moving leftward, we interpret liquidityNet as the opposite sign
+                    // safe because liquidityNet cannot be type(int128).min
+                    if (zeroForOne) liquidityNet = -liquidityNet;
+
+                    state.liquidity = LiquidityMath.addDelta(state.liquidity, liquidityNet);
+                }
+
+                state.tick = zeroForOne ? step.tickNext - 1 : step.tickNext;
+            } else if (state.sqrtPriceX96 != step.sqrtPriceStartX96) {
+                // recompute unless we're on a lower tick boundary (i.e. already transitioned ticks), and haven't moved
+                state.tick = TickMath.getTickAtSqrtRatio(state.sqrtPriceX96);
+            }
+        }
+
+      
+        (amount0, amount1) = zeroForOne == exactInput
+            ? (amountSpecified - state.amountSpecifiedRemaining, state.amountCalculated)
+            : (state.amountCalculated, amountSpecified - state.amountSpecifiedRemaining);
+	
+
+    }
+
+    function calc_univ2_amountOut(address _pool, bool _zeroForOne, uint256 _amountIn) public view returns (uint256) {
+	IUni2Pool pool = IUni2Pool(_pool);
+	uint112 reserve0;
+	uint112 reserve1;
+	if (reserve0 < 1 ether || reserve1 < 1 ether) {
+	    return 0;
+	}
+	uint32 blockTimestamp;
+	(reserve0, reserve1, blockTimestamp) = pool.getReserves();
+
+	uint256 reserveOut;
+	uint256 reserveIn;
+
+	if (_zeroForOne) {
+	    reserveOut = uint256(reserve0);
+	    reserveIn = uint256(reserve1);
+	} else {
+	    reserveOut = uint256(reserve1);
+	    reserveIn = uint256(reserve0);
+	}
+
+	uint256 amountInWithFee = _amountIn * 977;
+	return (amountInWithFee * reserveOut) / ((reserveIn * 1000) + amountInWithFee);
+    }
+
+    struct Params {
+	uint256 pool_type;
+	address pool;
+	address token0;
+	address token1;
+	uint256 amountIn;
+	uint256 amountOut;
+	bool zeroForOne;
+	int256 amountSpecified;
+	uint160 sqrtPriceLimitX96;
+    }
+
+    uint160 MIN_SQRT_PRICE = 4295128740;
+    uint160 MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970341;
     
+
+    function check_path(Params[] calldata params) public view returns (Params[] memory) {
+	uint256 steps = params.length;
+	Params[] memory path_params = new Params[](steps);
+	for (uint256 i = 0; i < steps; i++) {
+	    Params memory step;    
+
+	    step.pool = params[i].pool;
+	    step.token0 = params[i].token0;
+	    step.token1 = params[i].token1;
+	    step.zeroForOne = params[i].zeroForOne;
+
+	    if (params[i].pool_type == 0) {
+	
+		if (i != 0) {
+		    step.amountIn = path_params[i-1].amountOut;
+		} else {
+		    step.amountIn = params[i].amountIn;
+		}
+		
+		uint256 _aO = calc_univ2_amountOut(step.pool, step.zeroForOne, step.amountIn);
+		if (_aO == 0) {
+		    revert();
+		} else {
+		    step.amountOut = _aO;
+		}
+		
+
+		
+	    } else if (params[i].pool_type == 1) {
+		step.pool_type = 1;
+		if (i != 0) {
+		    uint256 _prev = i - 1;
+		    uint256 _prevAmountOut = path_params[_prev].amountOut;
+		    step.amountSpecified = _prevAmountOut.toInt256();
+		} else {
+		    step.amountSpecified = params[i].amountSpecified;
+		}
+		if (step.zeroForOne) {
+		    step.sqrtPriceLimitX96 = MIN_SQRT_PRICE;
+		} else {
+		    step.sqrtPriceLimitX96 = MAX_SQRT_PRICE;
+		}
+		int256 a0;
+		int256 a1;
+		(a0, a1) = calc_v3_swap(step.pool, step.zeroForOne, step.amountSpecified, step.sqrtPriceLimitX96);
+		if (a0 < 0) {
+		    a0 = a0 * -1;
+		    step.amountOut = uint256(a0);
+		    
+		} else if (a1 < 0) {
+		    a1 = a1 * -1;
+		    step.amountOut = uint256(a1);
+		}
+		
+	    }
+	    if (step.amountOut == 0) {
+		revert();
+	    }
+	    path_params[i] = step;
+	}
+    
+	return path_params;
+    }
 
 
     /* //    using Path for bytes;

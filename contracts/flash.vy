@@ -1,4 +1,4 @@
-# @version 0.3.3
+# @version 0.3.4
 """
 @title Base Aave V3 Flash Loan Simple Receiver
 @license MIT
@@ -248,7 +248,7 @@ def uniswapV3SwapCallback(amount0Delta: int256, amount1Delta: int256, data: Byte
        tokenOut = WETH
        fee = 500
     else:
-        assert False
+        raise
 
     ERC20(tokenIn).transfer(msg.sender, amount_to_pay)
 

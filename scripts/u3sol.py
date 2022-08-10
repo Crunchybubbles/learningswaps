@@ -1,37 +1,32 @@
 import brownie
-from brownie import accounts, TickTest, Contract, interface, QuoterV2, Router
+from brownie import accounts, TickTest, Contract, interface, QuoterV2, vyper_router 
 #from brownie.network import priority_fee
 import requests as r
 import math
 from collections import namedtuple
 import json
-
-
-
-
-
-class Uni3Pool:
-    def __init__(self, query):
-        self.address = query['id']
-        self.token0 = query['token0']
-        # self.token0_symbol = token0_symbol
-        # self.token0_decimals = decimals0
-        # self.token1 = token1
-        # self.token1_symbol = token1_symbol
-        # self.token1_decimals = decimals1
-        # self.fee = fee
-        # self.createdAtblock = block
-        # self.createdAtTime = Time
-        # self.ticks = ticks
-        # self.current_tick = current_tick
-        
+import time
         
 MAX_U256 = ((2**256) - 1)
 MAX_U160 = ((2**160) - 1)
 MIN_TICK = -887272
 MAX_TICK = 887272
 Q96 = 0x1000000000000000000000000
+MAX_POOL_LENGTH = 100
+YFI_ETH_V2_POOL = "0x2fdbadf3c4d5a8666bc06645b8358ab803996e28"
 
+YFI_ETH_V3_POOL = "0x04916039b1f59d9745bf6e0a21f191d1e0a84287"
+DAI_ETH_V3_POOL = "0x60594a405d53811d3BC4766596EFD80fd545A270"
+
+YFI = "0x0bc529c00c6401aef6d220be8c6ea1667f6ad93e"
+DAI = "0x6b175474e89094c44da98b954eedeac495271d0f"
+WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+
+MIN_SQRT_PRICE = 4295128740
+MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970341
+
+DAI_WHALE = "0x5d3a536e4d6dbd6114cc1ead35777bab948e3643"
+WETH_WHALE = "0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e"
 
 def getSqrtPriceFromTick(tick):
     tick = int(tick)
@@ -262,6 +257,7 @@ def getAllUni3Pools():
     """
     request1 = do_request(query1)
     for pool in request1['data']['pools']:
+        pool["pool_type"] = 1
         for tick in pool['ticks']:
             price = getSqrtPriceFromTick(tick['tickIdx'])
             tick['price'] = price
@@ -319,6 +315,7 @@ def getAllUni3Pools():
             break
 
         for pool in requestN['data']['pools']:
+            pool["pool_type"] = 1
             for tick in pool['ticks']:
                 price = getSqrtPriceFromTick(tick['tickIdx'])
                 tick['price'] = price
@@ -328,59 +325,6 @@ def getAllUni3Pools():
 #        print(uni3pools[-1])
     return uni3pools
 
-
-# def getAllUni3Pools_noTicks():
-#     uni3pools = []
-#     query1 = """
-#     {pools(first:1000,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc) { 
-#     id,
-#     token0 {id,symbol,decimals},
-#     token1{id,symbol,decimals},
-#     feeTier,
-#     createdAtBlockNumber,
-#     createdAtTimestamp,
-#     liquidity,
-#     sqrtPrice,
-#     token0Price,
-#     token1Price
-#     tick,
-#     }}
-#     """
-#     request1 = do_request(query1)
-#     for pool in request1['data']['pools']:
-#         uni3pools += [pool]
-#         #print(pool.keys())
-#     #print(uni3pools)
-#     lastTime = uni3pools[-1]['createdAtTimestamp']
-#     goOn = True
-#     while goOn:
-#         #last = len(uni3pools) - 1
-#         #lastTime = uni3pools[-1]['createdAtTimestamp']
-#         #print(lastTime)
-# #        print(uni3pools[-1])
-#         #print(len(uni3pools))
-#         #print(lastTime)
-#         print(uni3pools[-1]['id'])
-#         query2_1 = "{pools(first:1000,where:{liquidity_gt:0},orderBy:createdAtTimestamp,orderDirection:asc,where:{createdAtTimestamp_gt:"
-#         query2_3 = "}){id,token0{id,symbol,decimals},token1{id,symbol,decimals},feeTier,createdAtBlockNumber,createdAtTimestamp,liquidity,sqrtPrice,token0Price,token1Price,tick}}"
-#         query = query2_1 + uni3pools[-1]['createdAtTimestamp'] + query2_3
-#         requestN = do_request(query)
-# #        print(requestN)
-# #        print(requestN.keys())
-#         if requestN['data']['pools'] == []:
-#             #print(requestN)
-#             goOn = False
-#             break
-#         else:
-#             for pool in requestN['data']['pools']:
-#                 uni3pools += [pool]
-#             lastTime = uni3pools[-1]['createdAtTimestamp']
-# #        print(uni3pools[-1])
-#     return uni3pools
-
-
-    
-    
 
 def getPools():
     query = """
@@ -480,7 +424,6 @@ def getAmount0Delta(priceA, priceB, liquidity, roundUp):
         priceB = t
     numerator1 = int(liquidity) << 96
     numerator2 = priceB - priceA
-    #return (((numerator1 * numerator2) // priceB) // priceA)
     if roundUp:
         return divRoundingUp(mulDivRoundingUp(numerator1, numerator2, priceB), priceA)
     else:
@@ -497,15 +440,12 @@ def getAmount1Delta(priceA, priceB, liquidity, roundUp):
         return mulDivRoundingUp(liquidity, (priceB - priceA), Q96)
     else:
         return mulDiv(liquidity, (priceB - priceA), Q96)
-    #return ((int(liquidity) * (priceB - priceA)) // 96)
-    #return 
 
 def amount0Delta(priceA, priceB, liquidity):
     if liquidity < 0:
         return -getAmount0Delta(priceA, priceB, abs(liquidity), False)
     else:
         return getAmount0Delta(priceA, priceB, abs(liquidity), True)
-
     
 def amount1Delta(priceA, priceB, liquidity):
     if liquidity < 0:
@@ -534,6 +474,7 @@ def getNextPriceFromAmount0RoundingUp(price, liquidity, amount, add):
     else:
         denominator = numerator1 - (amount * price)
         return mulDivRoundingUp(numerator1, price, denominator)
+
 #issue leads here?
 def getNextPriceFromAmount1RoundingDown(price, liquidity, amount, add):
     if add:
@@ -1079,26 +1020,12 @@ def test_mulDiv(n1, n2, d):
     print(f"percent error {percent_error(m, r)}%")
     print("")
 
-
-YFI_ETH_V2_POOL = "0x2fdbadf3c4d5a8666bc06645b8358ab803996e28"
-
-YFI_ETH_V3_POOL = "0x04916039B1f59D9745Bf6E0a21f191D1e0A84287"
-DAI_ETH_V3_POOL = "0x60594a405d53811d3BC4766596EFD80fd545A270"
-YFI = "0x0bc529c00C6401aEF6D220BE8C6Ea1667F6Ad93e"
-DAI = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
-WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-
-MIN_SQRT_PRICE = 4295128740
-MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970341
-
-DAI_WHALE = "0x5d3a536e4d6dbd6114cc1ead35777bab948e3643"
-WETH_WHALE = "0xf04a5cc80b1e94c69b48f5ee68a08cd2f09a7c3e"
-
 def get_token_from_whale(Token_addr, whale_addr, amount, recipient):
     token = Contract(Token_addr)
     print(f"{recipient} balance for {Token_addr} | {token.balanceOf(recipient)}")
     token.transferFrom(whale_addr, recipient, amount, {"from": whale_addr})
     print(f"{recipient} balance for {Token_addr} | {token.balanceOf(recipient)}")
+
 
 def test_v3_two_hops():
     r = Router.deploy({"from": accounts[0]})
@@ -1236,18 +1163,7 @@ def token_to_pools(uni3pools):
                 ttp[token1] += [pool]
         else:
             ttp[token1] = [pool]
-    # for p in uni2pools:
-    #      if p['token0']['id'] in ttp:
-    #         if p['id'] not in ttp[p['token0']['id']]:
-    #             ttp[p['token0']['id']] += [p['id']]
-    #     else:
-    #         ttp[p['token0']['id']] += [p['id']]
 
-    #     if p['token1']['id'] in ttp:
-    #         if p['id'] not in ttp[p['token1']['id']]:
-    #             ttp[p['token1']['id']] += [p['id']]
-    #     else:
-    #         ttp[p['token1']['id']] += [p['id']]
     return ttp
 
 def pool_to_data(uni3pools):
@@ -1281,23 +1197,57 @@ def token_out(tokenIn, pooladdr, pooldata):
     if tokenIn == token1:
         return token0
 
-def _calc_params(path_of_pool_addr):
-    return path_of_pool_addr
+def calc_zeroForOne(tokenIn, pool):
+    if tokenIn == pool["token0"]['id']:
+        return True
+    else:
+        return False
+
+def calc_spl(zf1):
+    if zf1:
+        return MIN_SQRT_PRICE
+    else:
+        return MAX_SQRT_PRICE
     
-def searcher(first_token, current_token, loops, used_pools, token_to_pools, pooldata): 
+def _calc_params(path_of_pool_addr, start_token, pooldata):
+    params = []
+    tokenIn = start_token
+    
+    for pool in path_of_pool_addr:
+        pp = []
+        tokenOut = token_out(tokenIn, pool, pooldata)
+        zf1 = calc_zeroForOne(tokenIn, pooldata[pool])
+        spl = calc_spl(zf1)
+        pp += [{
+            "pool_type": pooldata[pool]["pool_type"],
+            "pool": pool,
+            "token0": pooldata[pool]['token0']['id'],
+            "token1": pooldata[pool]['token1']['id'],
+            "amountIn": 0,
+            "amountOut": 0,
+            "zeroForOne": zf1,
+            "amountSpecified": 0,
+            "sqrtPriceLimit": spl
+        }]
+#        params += [{"pool_address": pool, "tokenIn": tokenIn, "tokenOut": tokenOut}]
+        params += [pp]
+        tokenIn = tokenOut
+    return params
+    
+def searcher(first_token, target_token, current_token, loops, used_pools, token_to_pools, pooldata): 
     next_pool, next_token = find_next_market_and_next_token(used_pools, current_token, token_to_pools, pooldata)
     used_pools += [next_pool]
     if next_pool != "" and next_token != "":
-        if next_token == first_token:
-            if first_token not in loops:
-                loops[first_token] = [_calc_params(used_pools)]
+        if next_token == target_token:
+            if target_token not in loops:
+                loops[target_token] = [_calc_params(used_pools, first_token, pooldata)]
             else:
-                params = _calc_params(used_pools)
-                if params not in loops[first_token]:
-                    loops[first_token] += [params]
+                params = _calc_params(used_pools, first_token, pooldata)
+                if params not in loops[target_token]:
+                    loops[target_token] += [params]
         else:
-            
-            searcher(first_token, next_token, loops, used_pools, token_to_pools, pooldata)
+            if len(used_pools) < MAX_POOL_LENGTH:
+                searcher(first_token, target_token, next_token, loops, used_pools, token_to_pools, pooldata)
     else:
         pass
 
@@ -1309,205 +1259,27 @@ def path_search(token_to_pools, pooldata):
             tokenOut = token_out(token, pool, pooldata)
             used_pools = []
             used_pools += [pool]
-            searcher(token, tokenOut, loops, used_pools, token_to_pools, pooldata)
+            searcher(token, token, tokenOut, loops, used_pools, token_to_pools, pooldata)
     return loops
-    
-    
 
-#this one is working i think
-def find_paths(token_to_pools, pooldata):
+def path_finder(start_token, end_token, token_to_pools, pooldata):
     loops = {}
-    for token, pools in token_to_pools.items():
-        for pool in pools:
-            tokenOut = token_out(token, pool, pooldata)
-            used_pools = []
-            used_pools += [pool]
-            next_pool1, next_token1 = find_next_market_and_next_token(used_pools, tokenOut, token_to_pools, pooldata)
-            used_pools += [next_pool1]
-            if next_pool1 != "" and next_token1 != "":
-                if token == next_token1:
-                    if token not in loops:
-                        loops[token] = [used_pools]
-                    else:
-                        if used_pools not in loops[token]:
-                            loops[token] += [used_pools]
-                else:
-                    next_pool2, next_token2 = find_next_market_and_next_token(used_pools, next_token1, token_to_pools, pooldata)
-                    used_pools += [next_pool2]
-                    if next_pool2 != "" and next_token2 != "":
-                        if token == next_token2:
-                            if token not in loops:
-                                loops[token] = [used_pools]
-                            else:
-                                if used_pools not in loops[token]:
-                                
-                                    loops[token] += [used_pools]
-                        else:
-                            next_pool3, next_token3 = find_next_market_and_next_token(used_pools, next_token2, token_to_pools, pooldata)
-                            used_pools += [next_pool3]
-                            if next_pool3 != "" and next_token3 != "":
-                                if token == next_token3:
-                                    if token not in loops:
-                                        loops[token] = [used_pools]
-                                    else:
-                                        if used_pools not in loops[token]:
-                                            loops[token] += [used_pools]
-                                else:
-                                    next_pool4, next_token4 = find_next_market_and_next_token(used_pools, next_token3, token_to_pools, pooldata)
-                                    used_pools += [next_pool4]
-                                    if next_pool4 != "" and next_token4 != "":
-                                        if token == next_token4:
-                                            if token not in loops:
-                                                loops[token] = [used_pools]
-                                            else:
-                                                if used_pools not in loops[token]:
-                                                    loops[token] += [used_pools]
-                                        else:
-                                            next_pool5, next_token5 = find_next_market_and_next_token(used_pools, next_token4, token_to_pools, pooldata)
-                                            used_pools += [next_pool5]
-                                            if next_pool5 != "" and next_token5 != "":
-                                                if token == next_token5:
-                                                    if token not in loops:
-                                                        loops[token] = [used_pools]
-                                                    else:
-                                                        if used_pools not in loops[token]:
-                                                            loops[token] += [used_pools]
-                                                else:
-                                                    next_pool6, next_token6 = find_next_market_and_next_token(used_pools, next_token5, token_to_pools, pooldata)
-                                                    used_pools += [next_pool6]
-                                                    if next_pool6 != "" and next_token6 != "":
-                                                        if token == next_token6:
-                                                            if token not in loops:
-                                                                loops[token] = [used_pools]
-                                                            else:
-                                                                if used_pools not in loops[token]:
-                                                                    loops[token] += [used_pools]
-                                                    
-                                                    
-    return loops
-    
-    
+    pools = token_to_pools[start_token]
+    for pool in pools:
+        tokenOut = token_out(start_token, pool, pooldata)
+        used_pools = []
+        used_pools += [pool]
+        if tokenOut == end_token:
+            if end_token not in loops:
+                loops[end_token] = [_calc_params(used_pools, start_token, pooldata)]
+            else:
+                params = _calc_params(used_pools, start_token, pooldata)
+                if params not in loops[end_token]:
+                    loops[end_token] += [params]
+        else:
+            searcher(start_token, end_token, tokenOut, loops, used_pools, token_to_pools, pooldata)
+    return loops[end_token]
 
-
-# def level_one(token_to_pools, pooldata):
-#     level = {}
-#     for token, pools in token_to_pools.items():
-#         tokens = []
-#         for pool in pools:
-#             tokens += [token_out(token, pool, pooldata)]
-#         level[token] = tokens
-#     return level
-
-# def level_two(levelOne, token_to_pools, pooldata):
-#     lone = levelOne
-#     for k, tokens in levelOne.items():
-#         level = {}
-#         for token in tokens:
-#             pools = token_to_pools[token]
-#             tokensOut = []
-#             for pool in pools:
-#                 tokensOut += [token_out(token, pool, pooldata)]
-#             level[token] = tokensOut
-#         lone[k] = level
-                
-
-# def find_loops(token_to_pools, pooldata, used_pools):
-#     for token, pools in token_to_pools.items():
-#         usedPools = {}
-#         for pool in pools:
-#             usedPools[pool] = True
-            
-            
-        
-# def get_paths(token_to_pools, pooldata):
-#     paths = {}
-#     for token, pools in token_to_pools.items():
-#         for pool in pools:
-#             tokenOut1 = token_out(token, pool, pooldata)
-#             new_pools1 = token_to_pools[tokenOut1]
-#             for pool1 in new_pools1:
-#                 if pool1 != pool:
-#                     tokenOut2 = token_out(tokenOut1, pool1, pooldata)
-#                     if tokenOut2 == token:
-#                         if token not in paths:
-#                             paths[token] = [((token, pool), (tokenOut1, pool1))]
-#                         else:
-#                             paths[token] += [((token, pool), (tokenOut1, pool1))]
-#                     else:
-#                         new_pools2 = token_to_pools[tokenOut2]
-#                         for pool2 in new_pools2:
-#                             if pool != pool2 and pool1 != pool2:
-#                                 tokenOut3 = token_out(tokenOut2, pool2, pooldata)
-#                                 if tokenOut3 == token:
-#                                     if token not in paths:
-#                                         paths[token] = [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
-#                                     else:
-#                                         paths[token] += [((token, pool), (tokenOut1, pool1), (tokenOut2, pool2))]
-#     return paths   
-            #children[pool] = tokenOut
-            #{token:{pool:tokenOut}}
-        #root[token] = children
-        
-        #{token:{pool1:{pool2:tokenOut}}}    
-            
-        
-    
-
-
-# def find_closed_loops(token_to_pools, pooldata):
-#     loops = {}
-#     for token, pools in token_to_pools.items():
-#         for pool in pools:
-#             path = []
-#             tokens = []
-#             tokens += [token]
-#             path += [pool]
-
-#             token0 = pooldata[pool]['token0']['id']
-#             token1 = pooldata[pool]['token1']['id']
-            
-            
-#             if token0 == token:
-#                 tokenOut = token1
-                
-#             if token1 == token:
-#                 tokenOut = token0
-#             tokens += [tokenOut]
-#             next_pool, next_token = find_next_market_and_next_token(path, tokenOut, token_to_pools, pooldata)
-#             if next_pool == "":
-#                 break
-
-#             tokens += [next_token]
-#             path += [next_pool]
-
-#             if next_token == token:
-#                 if token in loops:
-#                     loops[token] += [{"path": path, "tokens": tokens}]
-#                 else:
-#                     loops[token] = [{"path": path, "tokens": tokens}]
-
-#             tokens = tokens[:-1]
-#             path = path[:-1]
-            
-            
-
-            
-                
-
-            
-
-
-#             for i in range(10):
-                
-
-                
-#                 next_pool, next_token = find_next_market_and_next_token(path, tokens[-1], token_to_pools, pooldata)
-
-                
-
-            # for np in token_to_pools[next_token]:
-            #     token0 = pooldata[np]['token0']['id']
-            #     token1 = pooldata[np]['token1']['id']
 def save_paths():
     uni3pools = load_uni3_data()
     token_to_pool_dic = token_to_pools(uni3pools)
@@ -1550,8 +1322,10 @@ def swaploop(loops, pooldata, initialIn):
 def starting_ending_token_test(_paths, pooldata):
     for token, paths in _paths.items():
         for path in paths:
-            start_pool = path[0]
-            end_pool = path[-1]
+            for pool in path[0]:
+                start_pool = pool
+            for pool in path[-1]:
+                end_pool = pool
             start_pool_token0 = pooldata[start_pool]['token0']['id']
             start_pool_token1 = pooldata[start_pool]['token1']['id']
             end_pool_token0 = pooldata[end_pool]['token0']['id']
@@ -1564,7 +1338,7 @@ def starting_ending_token_test(_paths, pooldata):
 
                 
 def path_info_and_checks(paths, pooldata):
-    starting_ending_token_test(_paths, pooldata)
+    starting_ending_token_test(paths, pooldata)
 
     loopcount = 0
     looplen = 0
@@ -1580,8 +1354,319 @@ def path_info_and_checks(paths, pooldata):
     print(loopcount)
     
     
+def openfileasjson(name):
+    f = open(name)
+    info = json.load(f)
+    f.close()
+    return info
+
+def saveasjson(name, data):
+    f = open(name, "w")
+    f.write(json.dumps(data))
+    f.close()
+
+def token_to_markets(allThePools):
+    ttp = {}
+    for protocol in allThePools:
+        #print(len(protocol))
+        if type(protocol) is dict:
+            for addr, pool in protocol.items():
+                token0 = pool['token0']['id']
+                token1 = pool['token1']['id']
+
+                if token0 in ttp:
+                    if addr not in ttp[token0]:
+                        ttp[token0] += [addr]
+                else:
+                    ttp[token0] = [addr]
+
+                if token1 in ttp:
+                    if addr not in ttp[token1]:
+                        ttp[token1] += [addr]
+                else:
+                    ttp[token1] = [addr]
+        else:
+            for pool in protocol:
+                addr = pool['id']
+                token0 = pool['token0']['id']
+                token1 = pool['token1']['id']
+                
+                if token0 in ttp:
+                    if addr not in ttp[token0]:
+                        ttp[token0] += [addr]
+                else:
+                    ttp[token0] = [addr]
+
+                if token1 in ttp:
+                    if addr not in ttp[token1]:
+                        ttp[token1] += [addr]
+                else:
+                    ttp[token1] = [addr]
+    return ttp
+
+def pool_to_params(allThePools):
+    d = {}
+    for protocol in allThePools:
+        for pool in protocol:
+            d[pool['id']] = pool
+    return d
+
+def add_pool_params(pools, filename, poolType):
+    # for pool in pools:
+    #     pool["pool_type"] = poolType
+    # saveasjson(filename, pools)
+    for pool in pools:
+        pools[pool]["pool_type"] = poolType
+    saveasjson(filename, pools)
+
+def dta(filename, data):
+    a = []
+    for key, value in data.items():
+        a += [value]
+    saveasjson(filename, a)
+
+def pool_type_check(pooldata):
+    for pool, data in pooldata.items():
+        try:
+            data['pool_type']
+        except KeyError:
+            print(data)
+
+def make_lower(pools):
+    p = []
+    for pool in pools:
+        pool['id'] = pool['id'].lower()
+        pool['token0']['id'] = pool['token0']['id'].lower()
+        pool['token1']['id'] = pool['token1']['id'].lower()
+        p += [pool]
+    return p
+
+# def check_path_reserves(path, pooldata):
+#     potential_paths = []
+#     for step in path:
+#         for pool in step:
+#             addr = pool
+#         if step['pool_type'] == 0:
+#             reserve0 = pooldata[addr]['token0']['reserves']
+#             reserve1 = pooldata[addr]['token1']['reserves']
+#             if reserve0 > 1000 and reserve1 > 1000:
+#                 potential_path = True
+#             else:
+#                 potential_path = false
+#         elif step['pool_type'] == 1:
+
+
+
+
+
+def path_len_dis(paths):
+    r = {}
+    for path in paths:
+        path_len = len(path)
+        if path_len not in r:
+            r[path_len] = 1
+        else:
+            r[path_len] += 1
+    return r
+
+def symbol_to_address(uni3pools):
+    book = {}
+    for pool in uni3pools:
+        
+        s0 = pool['token0']['symbol'].lower()
+        s1 = pool['token1']['symbol'].lower()
+        if s0 not in book:
+            book[s0] = pool['token0']['id']
+        if s1 not in book:
+            book[s1] = pool['token1']['id']
+    return book
+YFI_WHALE = "0xfeb4acf3df3cdea7399794d0869ef76a6efaff52"
+def get_token_from_whale(Token_addr, whale_addr, amount, recipient):
+    token = Contract(Token_addr)
+    print(f"{recipient} balance for {Token_addr} | {token.balanceOf(recipient)}")
+    token.transfer(recipient, amount, {"from": whale_addr})
+    print(f"{recipient} balance for {Token_addr} | {token.balanceOf(recipient)}")
+
+
+def _swapper(paths):
+    r = vyper_router.deploy({"from": accounts[0]})
+    get_token_from_whale(YFI, YFI_WHALE, (10**20), accounts[0])
+    Contract(start_token).approve(r.address, (2**256) - 1, {"from": accounts[0]}) 
+    for path in paths:
+        rp = path_to_router_path(path)
+        if rp[0][0] == 1:
+            g = list(rp[0])
+            g[4] = 10000
+            rp[0] = tuple(g)
+                    
+        else:
+            g = list(rp[0])
+            g[7] = 10000
+            rp[0] = tuple(g)
+            
+        print(rp[0])
+        r.swap_along_path(rp, start_token, end_token, accounts[0], {"from": accounts[0]})
+
+
+def pathnswap(paths):
+    #router = vyper_router.deploy({"from": accounts[0]})
+    tt = TickTest.deploy({"from": accounts[0]})
+    #get_token_from_whale(WETH, WETH_WHALE, Contract(WETH).balanceOf(WETH_WHALE), accounts[0])
+    #Contract(WETH).approve(router.address, (2**256) - 1, {"from": accounts[0]})
+    paths = sorted(paths, key=len)
+    for path in paths:
+        #print(path[0][0])
+        if path[0][0]["pool_type"] == 0:
+            path[0][0]["amountIn"] = 10**17
+        else:
+            path[0][0]["amountSpecified"] = 10**17
+        #print(path)
+        try:
+            print(".....................................")
+            #print("")
+            #print(path)
+            #print(path_to_router_path(path))
+            #prebal = Contract(WETH).balanceOf(accounts[0])
+            calced = tt.check_path(path_to_router_path(path))
+            #router.swap_along_path(calced, WETH, WETH, accounts[0], {"from": accounts[0]})
+            #postbal = Contract(WETH).balanceOf(accounts[0])
+            #diff = (postbal - prebal) * 10**-18
+            #print(diff)
+            if calced[0][0] == 0:
+                amountIn = calced[0][4]
+            else:
+                amountIn = calced[0][7]
+            amountOut = calced[-1][5]
+            diff = amountOut - amountIn
+            print(diff * 10**-18)
+            
+            if diff > 0:
+                print(calced)
+            #print(calced)
+            #print("")
+            #for pool in calced:
+                #print(pool)
+                # print("")
+            print("-------------------------------------")
+        except:
+#            time.sleep(.017)
+        #router.swap_along_path(calced, YFI, YFI, accounts[3], {"from": accounts[0]})
+            pass
     
+
+    
+    
+    
+def path_cli():
+    name_to_address = openfileasjson("book.txt")
+    pooldata = openfileasjson("pooldata.txt")
+    token_to_pools = openfileasjson("token_to_pools.txt")
+    while True:
+        start_token = ""
+        while start_token == "":
+            try:
+                start_token = name_to_address[str(input("start token: "))]
+            except KeyError:
+                pass
+
+        end_token = ""
+        while end_token == "":
+            try:
+                end_token = name_to_address[str(input("end token: "))]
+            except KeyError:
+                pass
+
+        print("paths")
+        start = time.time()
+        paths = path_finder(start_token, end_token, token_to_pools, pooldata)
+        end = time.time()
+        #for path in paths:
+            # if len(path) >= 10:
+            #     print(len(path)
+            #print(path)
+            #print("")
+        print(f"took: {end - start}")
+        print("number of paths",len(paths))
+        for k, v in sorted(path_len_dis(paths).items()):
+            print(k, v)
+        if str(input("print? ")) == "":
+            for path in paths:
+                print(path_to_router_path(path))
+                # for pool in path:
+                #     print(pool)
+                print("")
+        print("")
+        if str(input("swap? ")) == "":
+            #_swapper()          
+            pathnswap(paths)
+def expllore():
+    name_to_address = openfileasjson("book.txt")
+    pooldata = openfileasjson("pooldata.txt")
+    token_to_pools = openfileasjson("token_to_pools.txt")
+
+    while True:
+        what_to_do = ""
+        while what_to_do == "":
+            what_to_do = str(input("what to do? "))
+            if what_to_do == "pooldata":
+                print(pooldata[str(input("address: "))])
+            elif what_to_do == "ttm":
+                print(token_to_pools[name_to_address[str(input("token: "))]])
+            elif what_to_do == "paths":
+                path_cli(name_to_address, pooldata, token_to_pools)
+                what_to_do = ""
+                
+
+def find_all_pools_of_tokens():
+    pooldata = openfileasjson("pooldata.txt")
+    name_to_address = openfileasjson("book.txt")
+    token_to_pools = openfileasjson("token_to_pools.txt")
+    
+    while True:
+        start_token = ""
+        while start_token == "":
+            try:
+                start_token = name_to_address[str(input("start token: "))]
+            except KeyError: 
+                pass
+
+        end_token = ""
+        while end_token == "":
+            try:
+                end_token = name_to_address[str(input("end token: "))]
+            except KeyError:
+                pass
+        for pool, data in pooldata.items():
+            token0 = data['token0']['id']
+            token1 = data['token1']['id']
+            tokens = [token0, token1]
+            if start_token in tokens and end_token in tokens:
+                
+                assert pool in token_to_pools[start_token]
+                assert pool in token_to_pools[end_token]
+                print(pool)
+                print(token0)
+                print(token1)
+                print(data['pool_type'])
+                print("")
+                
+            
+def path_to_router_path(path):
+    p = []
+    for params in path:
+        pp = []
+        for param in params:
+            for v in param.values():
+                pp += [v]
+        p += [tuple(pp)]
+    return p
+
 def main():
+    #expllore()
+    #find_all_pools_of_tokens()
+    path_cli()
+    
+    
     #priority_fee("2 gwei")
     # pool = "0x88e6A0c2dDD26FEEb64F039a2c41296FcB3f5640"
     #yfi_eth =  "0x04916039b1f59d9745bf6e0a21f191d1e0a84287"
@@ -1598,197 +1683,50 @@ def main():
     #save_paths()
     
     #save_uni3_data()
-    uni3pools = load_uni3_data()
-    # # # for p in uni3pools:
-    # # #     print(p)
-    token_to_pool_dic = token_to_pools(uni3pools)
-    pool_to_data_dic = pool_to_data(uni3pools)
-    #paths = find_paths(token_to_pool_dic, pool_to_data_dic)
-    #profit = swaploop(paths, pool_to_data_dic, (10**18))
-    paths = path_search(token_to_pool_dic, pool_to_data_dic)
+    # uni3pools = openfileasjson("uni3_data.txt")
+    # sushipools = openfileasjson("sushipools.txt")
+    # uni2pools = openfileasjson("univ2pools.txt")
+    # pools = [uni3pools, sushipools, uni2pools]
 
-    d1 = pool_to_data_dic['0x632e675672f2657f227da8d9bb3fe9177838e726']
-    d2 = pool_to_data_dic['0xe3ee7ca56b5ae12876df64dc4017c873f91bdd6e']
-    data = [d1,d2]
-    for d in data:
-        for k, v in d.items():
-            print("")
-            print(k)
-            print(v)
-        
-    #profit = swaploop(paths, pool_to_data_dic, 10000)
-    #print(profit)
-    # for k,v in paths.items():
-    #     print("")
-    #     print(k)
-    #     for l in v:
-    #         print(len(l))
-
-
-
-    # save_paths()
-    # paths = load_paths()
-    # #paths = get_paths(token_to_pool_dic, pool_to_data_dic)
-    # for k, v in paths.items():
-    #     print(k)
-    #     print(v)
-    #     #################################print(len(v))
-    #     for path in v:
-    #         print("")
-    #         print(path[:][0])
-    #         print(path[:][1])
-    #         break
-    #     break
-        
-       # break
-    # for k, v in paths.items():
-    #     print("")
-    #     print("loops for token", k)
-    #     for l in v:
-    #         print("")
-    #         print(len(l))
-    #         print(l)
+    #saveasjson("book.txt", symbol_to_address(uni3pools))
     
-    # print(uni3pools[0]['id'])
-    # print(uni3pools[-1]['id'])
-    # print(len(uni3pools))
-    #tick_check(uni3pools[0])
-    #test_mulDiv((10**18), Q96, 217271867385839462693395)
-    #testTick(uni3pools[0])
-    #print(len(uni3pools[0]['ticks']))
-    #print(uni3pools[0]['tick'])
-    #test_nextTick(uni3pools[0])
-    # print("zeroForOne swap test")
-    # tokenIn = uni3pools[0]["token0"]['id']
-    # tokenOut = uni3pools[0]["token1"]['id']
-    # print(tokenIn, tokenOut)
-    # for i in range(18, 23):
-        
-    #     amountIn = 10**i
-    #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-    #     print(amountIn*10**-18, amountOut*10**-18)
-    # a = 247
-    # n = 18
-    # #test_stuff(uni3pools, n, a)    
-    # #quote_exactInSinglePool_oneForZero(uni3pools[0], n, a) 
-    # # swap_test_uniToWeth(uni3pools[0],n,a)
-    # bal, last_tick = swap_test(uni3pools[0],n,a)    
-    # # print("oneForZero swap test")
-    # tokenIn = uni3pools[0]["token1"]['id']
-    # tokenOut = uni3pools[0]["token0"]['id']
-    # # print(tokenIn, tokenOut)
-    # # for i in range(18, 23):
-        
-    # #     amountIn = 10**i
-    # #     amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-    # #     print(amountIn*10**-18, amountOut*10**-18)
-    # amountIn = a*10**n
-
-    # amountOut = v3swapExactIn(uni3pools[0], tokenIn, tokenOut, amountIn)
-    # print("my calculated amounts")
-    # print(amountOut)
-
-    # print("real last tick", last_tick)
-
+    #print(len(pools[0]) + len(pools[1]) + len(pools[2]))
+    #add_pool_params(sushipools, "sushipools.txt", 0)
+    #add_pool_params(uni2pools, "univ2pools.txt", 0)
+    #add_pool_params(uni3pools, "uni3_data.txt", 1)
+    #print(make_lower(sushipools))
+    #dta("sushipools.txt", sushipools)
+    #dta("univ2pools.txt", uni2pools)
     
+    #saveasjson("univ2pools.txt", make_lower(uni2pools))
+    #saveasjson("sushipools.txt", make_lower(sushipools))
+    #print(uni3pools)
+    #pooldata = pool_to_params(pools)
+    #print(len(pooldata))
+
+    #pooldata = openfileasjson("pooldata.txt")
+    #token_to_pools = openfileasjson("token_to_pools.txt")
+
+    # # # # for p in uni3pools:
+    # # # #     print(p)
+    #print(sushipools)
+    # start = time.time()
+    # token_to_pool_dic = token_to_markets(pools)
+    # end = time.time()
+    # print(end - start)
+    # print("bing")
+    # saveasjson("pooldata.txt", pooldata)
+    # print("bong")
+    # saveasjson("token_to_pools.txt", token_to_markets(pools))
+    # print("bang")
+    #print("dong")
+
+    # pool_to_data_dic = pool_to_params(pools)
+    # #paths = find_paths(token_to_pool_dic, pool_to_data_dic)
+    # #profit = swaploop(paths, pool_to_data_dic, (10**18))
+    #paths = path_search(token_to_pools, pooldata)
+    #saveasjson("paths_test.txt", paths)
+
+
+    #_cli()
     
-    # print(f"percent error {percent_error(amountOut, bal)}%")
-    # #tick_check(uni3pools[0])
-
-
-
-
-    
-
-    
-    #print(uni3pools[0]['token0Price'])
-    #print(uni3pools[0]['token1Price'])
-    #print(uni3pools[0]['sqrtPrice'])
-    #priceFromTick = getSqrtPriceFromTick(uni3pools[0]['tick'])
-    #print(priceFromTick)
-    #print(no_magic(uni3pools[0]['tick']))
-    
-    #print(t.priceFromTick(uni3pools[0]['tick']))
-    
-    
-    # #    ticks = pools[0]['ticks']
-    # addrs = []
-#     # ticks = [[]]
-    #print(ticksAndAddr(pools))
-
-#     for p in pools:
-#         addrs += [p['id']]
-#     (addresses, ticks) = getPools_Ticks(addrs)
-# #    print(addresses)
-# #    print(ticks)
-# #    print(u.getTickData(addresses[0], ticks[0]))
-#     print(addresses, ticks)
-    #(address, ticks) = ticksAndAddr(pools)
-    #c = u.forPools([address], [ticks])
-    #print(c[0])
-#    tick_array = []
-#    for i in c:
-#        print(i)
-        #     print(f"pool_addr {i[0]}")
-#         print(f"current_price {i[1]}")
-#         print(f"current_tick {i[2]}")
-#         print(f"liquidity {i[3]}")
-#         tick_array += i[4]
-#         for tick in i[4]:
-#             print(f"tickIdx {tick[0]}")
-#             print(f"price_at_tick {tick[1]}")
-#             print(f"liquitdityNet {tick[2]}")
-# #         print("                                ")
-    
-    #print(c[0][1])
-    # print(tick_array)
-  #   currentPrice = c[0][1]
-#     nextPrice = 349763628036266027723339106301
-# #    nextPrice = 79156945126914824732836954
-#     fee = 3000
-#     liquidity = c[0][3]
-#     amountRemaining = 10**18
-#     print(currentPrice, nextPrice, fee, liquidity, amountRemaining)
-#     print(computeSwapStep(currentPrice, nextPrice, liquidity, amountRemaining, fee)) #(price_next, amountIn, amountOut, feeAmount)
-
-
-#     currentPrice = c[0][1]
-# #    nextPrice = 349763628036266027723339106301
-#     nextPrice = 79156945126914824732836954
-#     fee = 3000
-#     liquidity = c[0][3]
-#     amountRemaining = 10**18
-#     print(currentPrice, nextPrice, fee, liquidity, amountRemaining)
-#     print(computeSwapStep(currentPrice, nextPrice, liquidity, amountRemaining, fee)) #(price_next, amountIn, amountOut, feeAmount)
-
-    #    print(addrs)
- #   da = getPools_Ticks(addrs)
- #   print(da)
- 
-        # for i, p in enumerate(pools):
-    #     addrs += [p['id']]
-    #     for t in p['ticks']:
-    #         print(t['tickIdx'])
-    
-    # q = u.forPools(addrs, ticks)
-    # print(q)
-    # for p in pools:
-    #     print(p)
-# d = u.forPools([yfi_eth],[ticks])
-    # for p in d:
-    #     for e in p:
-    #         print(e)
-    #    d = u.poolData(t)
-#    print(d)
-#    for i in d:
-#        print(i)
-    # s0 = d[0]
-    # t0 = d[1][0]
-    # t1 = d[1][1]
-    # t2 = d[1][2]
-    # tids = d[2]
-    # print(s0)
-    # print(t0)
-    # print(t1)
-    # print(t2)
-    # print(tids)
