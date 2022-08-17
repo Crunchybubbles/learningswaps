@@ -319,6 +319,25 @@ contract TickTest {
     using LowGasSafeMath for int256;
     using SafeCast for uint256;
     using SafeCast for int256;
+
+    uint160 constant MAX_SP = 1461446703485210103287273052203988822378723970341;
+    uint160 constant MIN_SP = 4295128740;
+
+
+    function ez_v3_calc(address _pool, uint256 amount, bool zeroForOne) public view returns(int256, int256) {
+	uint160 lim = 0;
+	if (zeroForOne) {
+	    lim = MIN_SP;
+	} else {
+	    lim = MAX_SP;
+	}
+	int256 amount0;
+	int256 amount1;
+	(amount0, amount1) = calc_v3_swap(_pool, zeroForOne, int256(amount), lim);
+	return (amount0, amount1);
+	
+    }
+
   
     function calc_v3_swap(
 		  address _pool,
@@ -421,6 +440,7 @@ contract TickTest {
 	
 
     }
+
 
     function calc_univ2_amountOut(address _pool, bool _zeroForOne, uint256 _amountIn) public view returns (uint256) {
 	IUni2Pool pool = IUni2Pool(_pool);
