@@ -1556,7 +1556,6 @@ def pathnswap(paths):
 
     
     
-    
 def path_cli():
     name_to_address = openfileasjson("book.txt")
     pooldata = openfileasjson("pooldata.txt")

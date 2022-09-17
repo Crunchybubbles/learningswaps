@@ -111,7 +111,7 @@ def swap_along_path(path: DynArray[Params, MAX_PATH_LENGTH], start_token: addres
                  path[i].amountSpecified = convert(IERC20(path[i].token1).balanceOf(self), int256)
         self.step_along_path(path[i])
     bal: uint256 = IERC20(end_token).balanceOf(self)
-    assert IERC20(end_token).transfer(to, bal)
+    IERC20(end_token).transfer(to, bal)
     
 
 @external

@@ -1,5 +1,5 @@
 import brownie
-from brownie import accounts, Router, Contract, interface, vyper_router
+from brownie import accounts, Router, Contract, interface, vyper_router, TickTest
 
 YFI_ETH_V2_POOL = "0x2fdbadf3c4d5a8666bc06645b8358ab803996e28"
 
@@ -239,14 +239,73 @@ def test_v2_v3_vyper():
 def df():
     vyper_router.deploy({"from": accounts[0]})
     get_token_from_whale(YFI, YFI_WHALE, Contract(YFI).balanceOf(YFI_WHALE), accounts[0])
-    Contract(YFI).approve(vyper_router[-1], (2**256)-1, {"from": accounts[0]})    
+    Contract(YFI).approve(vyper_router[-1], (2**256)-1, {"from": accounts[0]})
+
+def test_arb():
+    r = vyper_router.deploy({"from": accounts[0]})
+    #r = Router.deploy(aave_flash, {"from": accounts[0]})
+    t = TickTest.deploy({"from": accounts[0]})
+    #t = TickTest[-1]
+    token = WETH
+    whale = WETH_WHALE
+
+    amount = 10**18
+    get_token_from_whale(token, whale, amount, accounts[0])
+
+    pool = "0x8dd34eea39d0d90edfe5f8cc8005c99b905df139"
+    amountIn = amount
+    #calced = t.calc_univ2_amountOut(pool, False, amountIn)
+    
+
+    tokenA = "0x5faa989af96af85384b8a938c2ede4a7378d9875"
+    tokenB = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    
+    pool_type = 1
+    pool = pool
+    token0 = tokenA
+    token1 = tokenB
+    amountIn = 0
+    amountOut = 0
+    zeroForOne = False
+    amountSpecified = 668716549082496089
+    sqrtPriceLimit = MAX_SQRT_PRICE
+
+    start = token1
+
+    params1= (pool_type, pool, token0, token1, amountIn, amountOut, zeroForOne, amountSpecified, sqrtPriceLimit)
+
+    pool_type = 1
+    pool = "0x03e38c36a1e3122025f70ce08d9ed00ac0e37754"
+    token0 = tokenA
+    token1 = tokenB
+    amountIn = 0
+    amountOut = 0
+    zeroForOne = True
+    amountSpecified = 309823812353861197610
+    sqrtPriceLimit = MIN_SQRT_PRICE
+    
+
+    end = token1
+
+    params2= (pool_type, pool, token0, token1, amountIn, amountOut, zeroForOne, amountSpecified, sqrtPriceLimit)
+
+    params = [params1, params2]
+    print(params)
+    Contract(token).approve(r.address, 10**18, {"from": accounts[0]})
+    pre = Contract(token).balanceOf(accounts[0])
+    r.swap_along_path(params, start, end, accounts[0], {"from": accounts[0]})
+    post = Contract(token).balanceOf(accounts[0])
+    #print(t.check_path(params))
+
+    print((post - pre) * 10**-18)
     
 def main():
     #test_v3_two_hops() #it worked! #gas used 4611265
     #test_v2_v3()
     #test_v3_two_hops_vyper() #first attempt failed used gas used 4487309
     #test_v3_single_hop_vyper()
-    df()
+    #df()
     #test_test_v3_single_hop_vyper()
     #print(Contract(DAI).balanceOf(accounts[0]))
     #print(Contract(YFI).balanceOf(accounts[0]))
+    test_arb()
